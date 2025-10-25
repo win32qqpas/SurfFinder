@@ -6,19 +6,22 @@ from telethon.sessions import StringSession
 from datetime import datetime
 
 # =============================
-# Конфигурация
+# Проверка и загрузка переменных окружения
 # =============================
-API_ID = int(os.environ.get("API_ID"))
-API_HASH = os.environ.get("API_HASH")
 SESSION_STRING = os.environ.get("SESSION_STRING")
-OWNER_ID = int(os.environ.get("OWNER_ID"))
+API_ID = os.environ.get("API_ID")
+API_HASH = os.environ.get("API_HASH")
 CHECK_INTERVAL_HOURS = float(os.environ.get("CHECK_INTERVAL_HOURS", 0.75))
 
 if not SESSION_STRING:
     raise SystemExit("ERROR: SESSION_STRING не задан. Сгенерируй её через make_session.py и добавь в Environment Variables.")
+if not API_ID or not API_HASH:
+    raise SystemExit("ERROR: API_ID или API_HASH не заданы. Добавь их в Environment Variables.")
+
+print("✅ SESSION_STRING видна, первые 10 символов:", SESSION_STRING[:10])
 
 # =============================
-# Списки каналов и ключевых слов
+# Каналы и ключевые слова
 # =============================
 CHANNELS = [
     "balichatik","voprosBali","bali_russia_choogl","cangguchat",
@@ -34,9 +37,9 @@ KEYWORDS = [
 ]
 
 # =============================
-# Клиент
+# Инициализация клиента
 # =============================
-client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+client = TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH)
 
 # =============================
 # Вспомогательные функции
@@ -63,7 +66,7 @@ def format_message(channel, msg):
 # Основной цикл
 # =============================
 async def main():
-    await client.start()  # уже не требует ввода телефона
+    await client.start()
     me = await client.get_me()
     print(f"🚀 SurfFinder запущен. Аккаунт: {me.username or me.first_name}")
 
