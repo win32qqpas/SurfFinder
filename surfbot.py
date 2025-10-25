@@ -2,20 +2,18 @@ import os
 import asyncio
 import random
 from telethon import TelegramClient, errors
-from telethon.sessions import StringSession
 from datetime import datetime
 
 # =============================
 # Конфигурация
 # =============================
-API_ID = int(os.environ.get("API_ID"))
-API_HASH = os.environ.get("API_HASH")
-SESSION = os.environ.get("SESSION_STRING")  # Строка сессии твоего аккаунта
-OWNER_ID = int(os.environ.get("OWNER_ID"))  # Твой Telegram ID
+API_ID = int(os.environ.get("API_ID"))         # твой API_ID
+API_HASH = os.environ.get("API_HASH")          # твой API_HASH
+OWNER_ID = int(os.environ.get("OWNER_ID"))     # твой Telegram ID
 CHECK_INTERVAL_HOURS = float(os.environ.get("CHECK_INTERVAL_HOURS", 0.75))  # 45 минут
 
-if not SESSION:
-    raise SystemExit("ERROR: SESSION_STRING не задан. Сгенерируй её через Telethon и добавь в Environment Variables.")
+# Создаем клиент для живого аккаунта
+client = TelegramClient("user_session", API_ID, API_HASH)
 
 # =============================
 # Списки каналов и ключевых слов
@@ -32,11 +30,6 @@ KEYWORDS = [
     "уроки серфинга","тренер по серфингу","серфтренер",
     "занятие по серфингу","серфкемп","ищу инструктора по серфингу"
 ]
-
-# =============================
-# Создаём клиент
-# =============================
-client = TelegramClient(StringSession(SESSION), API_ID, API_HASH)
 
 # =============================
 # Вспомогательные функции
@@ -56,9 +49,7 @@ def format_message(channel, msg):
                 author += f" (@{sender.username})"
     except Exception:
         pass
-    # Текст срез
     text_snippet = (msg.message[:700] + "...") if len(msg.message or "") > 700 else (msg.message or "")
-    # Ссылка
     link = f"https://t.me/{getattr(msg.to_id, 'channel_id', msg.id)}" if not getattr(msg, 'id', None) else f"https://t.me/{channel}/{msg.id}"
     return f"📍 {channel}\n👤 {author.strip()}\n🕒 {msg.date.strftime('%d.%m %H:%M')}\n\n{text_snippet}\n🔗 {link}"
 
@@ -66,9 +57,7 @@ def format_message(channel, msg):
 # Основной цикл
 # =============================
 async def main():
-    await client.connect()
-    if not await client.is_user_authorized():
-        await client.start()  # только при первом запуске сессии
+    await client.start()  # Попросит код при первом запуске
     me = await client.get_me()
     print(f"🚀 SurfFinder запущен. Аккаунт: {me.username or me.first_name}")
 
@@ -84,7 +73,7 @@ async def main():
                     if msg.message and contains_keyword(msg.message):
                         formatted = format_message(channel, msg)
                         found_messages.append(formatted)
-                await asyncio.sleep(1 + random.random()*2)  # маленькая случайная пауза между каналами
+                await asyncio.sleep(1 + random.random()*2)
 
             except errors.FloodWaitError as e:
                 print(f"⏳ FloodWait {e.seconds}s для {channel}, спим...")
@@ -93,7 +82,6 @@ async def main():
                 print(f"❌ Ошибка при обработке {channel}: {e}")
                 await asyncio.sleep(2)
 
-        # Отправляем все найденные сообщения одним блоком
         if found_messages:
             batch_message = "\n\n---\n\n".join(found_messages)
             try:
