@@ -1,112 +1,65 @@
-# SurfFinder — Telegram бот для поиска клиентов по ключевым словам
-# Работает каждые 20 минут, ищет по публичным чатам и присылает тебе результаты
-# Автор: ты и твоя волна 🌊
-
 import os
 import asyncio
-import re
 from datetime import datetime, timezone, timedelta
-from telethon import TelegramClient, errors
+from telethon import TelegramClient, errors, events
 
-# ==== Конфигурация ====
-API_ID = int(os.environ.get('API_ID', '0'))
-API_HASH = os.environ.get('API_HASH', '')
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
-OWNER_ID = int(os.environ.get('OWNER_ID', '0'))
+# =============================
+# Настройка бота
+# =============================
+API_ID = int(os.environ.get("API_ID"))
+API_HASH = os.environ.get("API_HASH")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+OWNER_ID = int(os.environ.get("OWNER_ID"))
 
-# Проверять каждые 20 минут (0.333333 часа)
-CHECK_INTERVAL_HOURS = float(os.environ.get('CHECK_INTERVAL_HOURS', '0.333333'))
+# Создаём клиент бота
+client = TelegramClient("bot_session", API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
-CHANNELS_RAW = os.environ.get('CHANNELS', '')
-KEYWORDS_RAW = os.environ.get('KEYWORDS', '')
+# =============================
+# Списки каналов и ключевых слов
+# =============================
+CHANNELS = [
+    "balichatik","voprosBali","bali_russia_choogl","cangguchat",
+    "bali_ubud_changu","balichat_canggu","balichat_bukit","balichatnash",
+    "balichat_bukitwoman","balichatfit","balichatsurfing","balisurfer",
+    "ChatCanggu","bukit_bali2","baliaab666","bali_chat","bali_ua"
+]
 
-CHANNELS = [c.strip() for c in CHANNELS_RAW.split(',') if c.strip()]
-KEYWORDS = [k.strip().lower() for k in KEYWORDS_RAW.split(',') if k.strip()]
+KEYWORDS = [
+    "серфинг","серф","инструктор по серфингу","серфурок",
+    "уроки серфинга","тренер по серфингу","серфтренер",
+    "занятие по серфингу","серфкемп","ищу инструктора по серфингу"
+]
 
-if not (API_ID and API_HASH and BOT_TOKEN and OWNER_ID and CHANNELS and KEYWORDS):
-    print("❌ Ошибка: не заданы все переменные окружения. Проверь API_ID, API_HASH, BOT_TOKEN, OWNER_ID, CHANNELS, KEYWORDS.")
-    raise SystemExit(1)
+CHECK_INTERVAL_HOURS = float(os.environ.get("CHECK_INTERVAL_HOURS", 0.333333))  # 20 минут
 
-# ==== Функция поиска ====
-async def search_messages(client):
-    found = []
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(hours=CHECK_INTERVAL_HOURS + 1)
-
-    for chat in CHANNELS:
-        try:
-            entity = await client.get_entity(chat)
-        except Exception as e:
-            print(f"⚠️ Не удалось получить чат {chat}: {e}")
-            continue
-
-        for kw in KEYWORDS:
-            try:
-                async for msg in client.iter_messages(entity, search=kw, limit=50):
-                    if not msg.message:
-                        continue
-                    msg_date = msg.date.replace(tzinfo=timezone.utc)
-                    if msg_date < cutoff:
-                        continue
-
-                    author = "—"
-                    try:
-                        sender = await msg.get_sender()
-                        if sender:
-                            author = (sender.first_name or '') + ' ' + (sender.last_name or '')
-                            if getattr(sender, 'username', None):
-                                author += f" (@{sender.username})"
-                    except Exception:
-                        pass
-
-                    link = f"https://t.me/{getattr(entity, 'username', entity.id)}/{msg.id}" if getattr(entity, 'username', None) else ''
-                    text = msg.message[:700]
-
-                    found.append({
-                        "chat": chat,
-                        "author": author.strip(),
-                        "text": text,
-                        "link": link,
-                        "date": msg_date
-                    })
-
-            except errors.FloodWaitError as e:
-                print(f"⏳ FloodWait: ждём {e.seconds} секунд")
-                await asyncio.sleep(e.seconds + 5)
-            except Exception as e:
-                print(f"Ошибка при поиске в {chat}: {e}")
-
-    return found
-
-# ==== Основной цикл ====
+# =============================
+# Основной цикл
+# =============================
 async def main():
+    await client.start()
     print("🚀 SurfFinder запущен!")
-    client = TelegramClient("surf_session", API_ID, API_HASH)
-    await client.start(bot_token=BOT_TOKEN)
 
     while True:
-        try:
-            results = await search_messages(client)
-            if results:
-                message = f"🌊 Найдено {len(results)} сообщений о серфинге:\n\n"
-                for r in results:
-                    message += f"📍 {r['chat']}\n👤 {r['author']}\n🕒 {r['date'].strftime('%d.%m %H:%M')}\n\n{r['text']}\n🔗 {r['link']}\n\n"
+        for channel in CHANNELS:
+            try:
+                entity = await client.get_entity(channel)
+                messages = await client.get_messages(entity, limit=50)
+                for msg in messages:
+                    text = msg.message
+                    if text and any(keyword.lower() in text.lower() for keyword in KEYWORDS):
+                        link = f"https://t.me/{channel}/{msg.id}" if hasattr(msg, "id") else f"https://t.me/{channel}"
+                        await client.send_message(OWNER_ID, f"Найдено сообщение:\n\n{text}\n\nСсылка: {link}")
+            except errors.FloodWaitError as e:
+                print(f"⏳ FloodWait {e.seconds} сек. для {channel}")
+                await asyncio.sleep(e.seconds + 5)
+            except Exception as e:
+                print(f"Ошибка при поиске в {channel}: {e}")
 
-                try:
-                    await client.send_message(OWNER_ID, message)
-                    print(f"✅ Отправлено {len(results)} результатов владельцу")
-                except Exception as e:
-                    print(f"Ошибка при отправке: {e}")
-            else:
-                print(f"🤙 Нет новых сообщений ({datetime.now().strftime('%H:%M:%S')})")
-
-        except Exception as e:
-            print(f"Ошибка в основном цикле: {e}")
-
+        print(f"🤙 Проверка завершена. Следующая через {CHECK_INTERVAL_HOURS*60:.0f} минут.")
         await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
 
+# =============================
+# Запуск
+# =============================
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("🛑 SurfFinder остановлен вручную.")
+    asyncio.run(main())
