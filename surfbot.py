@@ -2,18 +2,20 @@ import os
 import asyncio
 import random
 from telethon import TelegramClient, errors
+from telethon.sessions import StringSession
 from datetime import datetime
 
 # =============================
 # Конфигурация
 # =============================
-API_ID = int(os.environ.get("API_ID"))         # твой API_ID
-API_HASH = os.environ.get("API_HASH")          # твой API_HASH
-OWNER_ID = int(os.environ.get("OWNER_ID"))     # твой Telegram ID
-CHECK_INTERVAL_HOURS = float(os.environ.get("CHECK_INTERVAL_HOURS", 0.75))  # 45 минут
+API_ID = int(os.environ.get("API_ID"))
+API_HASH = os.environ.get("API_HASH")
+SESSION_STRING = os.environ.get("SESSION_STRING")
+OWNER_ID = int(os.environ.get("OWNER_ID"))
+CHECK_INTERVAL_HOURS = float(os.environ.get("CHECK_INTERVAL_HOURS", 0.75))
 
-# Создаем клиент для живого аккаунта
-client = TelegramClient("user_session", API_ID, API_HASH)
+if not SESSION_STRING:
+    raise SystemExit("ERROR: SESSION_STRING не задан. Сгенерируй её через make_session.py и добавь в Environment Variables.")
 
 # =============================
 # Списки каналов и ключевых слов
@@ -32,6 +34,11 @@ KEYWORDS = [
 ]
 
 # =============================
+# Клиент
+# =============================
+client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
+
+# =============================
 # Вспомогательные функции
 # =============================
 def contains_keyword(text):
@@ -39,7 +46,6 @@ def contains_keyword(text):
     return any(kw.lower() in text for kw in KEYWORDS)
 
 def format_message(channel, msg):
-    # Автор
     author = "—"
     try:
         sender = asyncio.run(msg.get_sender())
@@ -50,14 +56,14 @@ def format_message(channel, msg):
     except Exception:
         pass
     text_snippet = (msg.message[:700] + "...") if len(msg.message or "") > 700 else (msg.message or "")
-    link = f"https://t.me/{getattr(msg.to_id, 'channel_id', msg.id)}" if not getattr(msg, 'id', None) else f"https://t.me/{channel}/{msg.id}"
+    link = f"https://t.me/{channel}/{msg.id}" if getattr(msg, "id", None) else f"https://t.me/{getattr(msg.to_id, 'channel_id', '')}"
     return f"📍 {channel}\n👤 {author.strip()}\n🕒 {msg.date.strftime('%d.%m %H:%M')}\n\n{text_snippet}\n🔗 {link}"
 
 # =============================
 # Основной цикл
 # =============================
 async def main():
-    await client.start()  # Попросит код при первом запуске
+    await client.start()  # уже не требует ввода телефона
     me = await client.get_me()
     print(f"🚀 SurfFinder запущен. Аккаунт: {me.username or me.first_name}")
 
@@ -85,7 +91,7 @@ async def main():
         if found_messages:
             batch_message = "\n\n---\n\n".join(found_messages)
             try:
-                await client.send_message('me', batch_message)  # уведомление в Saved Messages
+                await client.send_message('me', batch_message)
                 print(f"✅ Отправлено {len(found_messages)} сообщений.")
             except Exception as e:
                 print(f"❌ Ошибка отправки сообщений: {e}")
