@@ -3,10 +3,10 @@ import asyncio
 import random
 from telethon import TelegramClient, errors
 from telethon.sessions import StringSession
-from datetime import datetime
+from datetime import datetime, timezone
 
 # =============================
-# Проверка и загрузка переменных окружения
+# Переменные окружения
 # =============================
 SESSION_STRING = os.environ.get("SESSION_STRING")
 API_ID = os.environ.get("API_ID")
@@ -48,10 +48,10 @@ def contains_keyword(text):
     text = text.lower()
     return any(kw.lower() in text for kw in KEYWORDS)
 
-def format_message(channel, msg):
+async def format_message(channel, msg):
     author = "—"
     try:
-        sender = asyncio.run(msg.get_sender())
+        sender = await msg.get_sender()
         if sender:
             author = (sender.first_name or "") + " " + (sender.last_name or "")
             if getattr(sender, "username", None):
@@ -71,7 +71,7 @@ async def main():
     print(f"🚀 SurfFinder запущен. Аккаунт: {me.username or me.first_name}")
 
     while True:
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
         found_messages = []
 
         for channel in CHANNELS:
@@ -80,7 +80,7 @@ async def main():
                 messages = await client.get_messages(entity, limit=50)
                 for msg in messages:
                     if msg.message and contains_keyword(msg.message):
-                        formatted = format_message(channel, msg)
+                        formatted = await format_message(channel, msg)
                         found_messages.append(formatted)
                 await asyncio.sleep(1 + random.random()*2)
 
@@ -99,7 +99,7 @@ async def main():
             except Exception as e:
                 print(f"❌ Ошибка отправки сообщений: {e}")
 
-        elapsed = (datetime.utcnow() - start_time).total_seconds()
+        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
         print(f"🕒 Цикл завершен. Найдено {len(found_messages)} сообщений. Время: {elapsed:.1f}s. Следующая проверка через {CHECK_INTERVAL_HOURS*60:.0f} минут.")
         await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
 
