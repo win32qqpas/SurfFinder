@@ -1,7 +1,6 @@
 import os
 import asyncio
-from datetime import datetime, timezone, timedelta
-from telethon import TelegramClient, errors, events
+from telethon import TelegramClient, errors
 
 # =============================
 # Настройка бота
@@ -11,7 +10,7 @@ API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 OWNER_ID = int(os.environ.get("OWNER_ID"))
 
-# Создаём клиент бота
+# Создаём клиента бота
 client = TelegramClient("bot_session", API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
 # =============================
@@ -30,7 +29,10 @@ KEYWORDS = [
     "занятие по серфингу","серфкемп","ищу инструктора по серфингу"
 ]
 
-CHECK_INTERVAL_HOURS = float(os.environ.get("CHECK_INTERVAL_HOURS", 0.333333))  # 20 минут
+# =============================
+# Интервал проверки: 45 минут
+# =============================
+CHECK_INTERVAL_HOURS = float(os.environ.get("CHECK_INTERVAL_HOURS", 0.75))  # 45 минут
 
 # =============================
 # Основной цикл
@@ -49,6 +51,7 @@ async def main():
                     if text and any(keyword.lower() in text.lower() for keyword in KEYWORDS):
                         link = f"https://t.me/{channel}/{msg.id}" if hasattr(msg, "id") else f"https://t.me/{channel}"
                         await client.send_message(OWNER_ID, f"Найдено сообщение:\n\n{text}\n\nСсылка: {link}")
+
             except errors.FloodWaitError as e:
                 print(f"⏳ FloodWait {e.seconds} сек. для {channel}")
                 await asyncio.sleep(e.seconds + 5)
