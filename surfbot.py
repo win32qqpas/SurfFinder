@@ -1,24 +1,22 @@
 import os
 import asyncio
 import random
-from telethon import TelegramClient, errors, events
-from telethon.sessions import StringSession
+from telethon import TelegramClient, events, errors
 from datetime import datetime, timezone
 
 # =============================
 # Проверка и загрузка переменных окружения
 # =============================
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-API_ID = os.environ.get("API_ID")
-API_HASH = os.environ.get("API_HASH")
 CHECK_INTERVAL_HOURS = float(os.environ.get("CHECK_INTERVAL_HOURS", 0.75))
+CHAT_ID = os.environ.get("CHAT_ID")  # сюда бот будет отправлять сообщения
 
 if not BOT_TOKEN:
-    raise SystemExit("ERROR: BOT_TOKEN не задан. Добавь его в Environment Variables.")
-if not API_ID or not API_HASH:
-    raise SystemExit("ERROR: API_ID или API_HASH не заданы. Добавь их в Environment Variables.")
+    raise SystemExit("ERROR: BOT_TOKEN не задан. Создай бота через BotFather и добавь токен в Environment Variables.")
+if not CHAT_ID:
+    raise SystemExit("ERROR: CHAT_ID не задан. Добавь ID чата или @username в Environment Variables.")
 
-print("✅ BOT_TOKEN найден.")
+print("✅ BOT_TOKEN найден. CHAT_ID =", CHAT_ID)
 
 # =============================
 # Каналы и ключевые слова
@@ -38,9 +36,9 @@ KEYWORDS = [
 ]
 
 # =============================
-# Инициализация клиента бота
+# Инициализация клиента
 # =============================
-client = TelegramClient('bot_session', int(API_ID), API_HASH).start(bot_token=BOT_TOKEN)
+client = TelegramClient('bot_session', 0, '').start(bot_token=BOT_TOKEN)
 
 # =============================
 # Вспомогательные функции
@@ -71,7 +69,7 @@ async def check_history():
     for channel in CHANNELS:
         try:
             entity = await client.get_entity(channel)
-            messages = await client.get_messages(entity, limit=100)  # 100 сообщений
+            messages = await client.get_messages(entity, limit=100)  # лимит 100 сообщений
             for msg in messages:
                 if msg.message and contains_keyword(msg.message):
                     formatted = await format_message(channel, msg)
@@ -86,8 +84,6 @@ async def check_history():
     if found_messages:
         batch_message = "\n\n---\n\n".join(found_messages)
         try:
-            # Для бота можно отправлять на заранее выбранный чат
-            CHAT_ID = os.environ.get("CHAT_ID")  # например, свой Telegram ID
             await client.send_message(CHAT_ID, batch_message)
             print(f"✅ История: отправлено {len(found_messages)} сообщений.")
         except Exception as e:
@@ -97,26 +93,26 @@ async def check_history():
 # Основной цикл
 # =============================
 async def main():
+    await client.start()
     me = await client.get_me()
-    print(f"🚀 SurfBot запущен. Бот: {me.username}")
+    print(f"🚀 SurfFinder Bot запущен. Имя бота: {me.username or me.first_name}")
 
-    # ====== Проверяем историю сразу ======
+    # Проверяем историю сразу
     await check_history()
 
-    # ====== Слушаем новые сообщения ======
+    # Слушаем новые сообщения
     @client.on(events.NewMessage(chats=CHANNELS))
     async def handler(event):
         text = event.message.message
         if contains_keyword(text):
             formatted = await format_message(event.chat.username or event.chat.title, event.message)
             try:
-                CHAT_ID = os.environ.get("CHAT_ID")
                 await client.send_message(CHAT_ID, formatted)
                 print(f"✅ Новое сообщение из {event.chat.title}")
             except Exception as e:
                 print(f"❌ Ошибка отправки нового сообщения: {e}")
 
-    # ====== Периодический цикл для логов ======
+    # Периодический цикл
     while True:
         print(f"🕒 Цикл проверки завершен. Следующая проверка через {CHECK_INTERVAL_HOURS*60:.0f} минут.")
         await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
