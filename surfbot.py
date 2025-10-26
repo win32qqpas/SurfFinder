@@ -5,15 +5,17 @@ from telethon import TelegramClient, events, errors
 from datetime import datetime
 
 # =============================
-# Переменные окружения
+# Проверка и загрузка переменных окружения
 # =============================
 API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHECK_INTERVAL_HOURS = float(os.environ.get("CHECK_INTERVAL_HOURS", 0.75))
 
-if not API_ID or not API_HASH or not BOT_TOKEN:
-    raise SystemExit("ERROR: API_ID, API_HASH или BOT_TOKEN не заданы.")
+if not API_ID or not API_HASH:
+    raise SystemExit("ERROR: API_ID или API_HASH не заданы.")
+if not BOT_TOKEN:
+    raise SystemExit("ERROR: BOT_TOKEN не задан.")
 
 print("✅ API_ID, API_HASH и BOT_TOKEN найдены.")
 
@@ -37,16 +39,16 @@ KEYWORDS = [
 # =============================
 # Инициализация клиента
 # =============================
-client = TelegramClient('bot_session', int(API_ID), API_HASH)
+client = TelegramClient('bot_session', int(API_ID), API_HASH).start(bot_token=BOT_TOKEN)
 
 # =============================
 # Вспомогательные функции
 # =============================
-def contains_keyword(text: str) -> bool:
+def contains_keyword(text):
     text = text.lower()
     return any(kw.lower() in text for kw in KEYWORDS)
 
-async def format_message(channel, msg) -> str:
+async def format_message(channel, msg):
     author = "—"
     try:
         sender = await msg.get_sender()
@@ -92,10 +94,12 @@ async def check_history():
 # Основной цикл
 # =============================
 async def main():
-    await client.start(bot_token=BOT_TOKEN)
+    await client.start()
     me = await client.get_me()
-    BOT_NAME = me.username or me.first_name
-    print(f"🚀 SurfHunter Bot запущен. Имя бота: {BOT_NAME}")
+    print(f"🚀 SurfHunter Bot запущен. Имя бота: {me.username or me.first_name}")
+    
+    # Отправка сообщения себе при старте
+    await client.send_message('me', "✅ SurfHunter Bot успешно запущен!")
 
     # Проверяем историю сразу
     await check_history()
@@ -108,7 +112,7 @@ async def main():
             formatted = await format_message(event.chat.username or event.chat.title, event.message)
             try:
                 await client.send_message('me', formatted)
-                print(f"✅ Новое сообщение из {event.chat.title} через @{BOT_NAME}")
+                print(f"✅ Новое сообщение из {event.chat.title}")
             except Exception as e:
                 print(f"❌ Ошибка отправки нового сообщения: {e}")
 
@@ -122,7 +126,6 @@ async def main():
 # =============================
 if __name__ == "__main__":
     try:
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(main())
+        asyncio.run(main())
     except KeyboardInterrupt:
         print("Stopped by user")
