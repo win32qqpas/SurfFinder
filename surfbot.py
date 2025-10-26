@@ -7,16 +7,15 @@ from datetime import datetime
 # =============================
 # Переменные окружения
 # =============================
-API_ID = int(os.environ.get("API_ID"))
+API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHECK_INTERVAL_HOURS = float(os.environ.get("CHECK_INTERVAL_HOURS", 0.75))
-CHAT_ID = os.environ.get("CHAT_ID")  # ID куда отправлять сообщения, если пусто — 'me'
 
-if not BOT_TOKEN or not API_ID or not API_HASH:
-    raise SystemExit("ERROR: BOT_TOKEN, API_ID или API_HASH не заданы в Environment Variables")
+if not API_ID or not API_HASH or not BOT_TOKEN:
+    raise SystemExit("ERROR: API_ID, API_HASH или BOT_TOKEN не заданы.")
 
-print(f"✅ API_ID, API_HASH и BOT_TOKEN найдены. CHAT_ID = {CHAT_ID}")
+print("✅ API_ID, API_HASH и BOT_TOKEN найдены.")
 
 # =============================
 # Каналы и ключевые слова
@@ -36,18 +35,18 @@ KEYWORDS = [
 ]
 
 # =============================
-# Клиент Telethon
+# Инициализация клиента
 # =============================
-client = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
+client = TelegramClient('bot_session', int(API_ID), API_HASH)
 
 # =============================
 # Вспомогательные функции
 # =============================
-def contains_keyword(text):
+def contains_keyword(text: str) -> bool:
     text = text.lower()
     return any(kw.lower() in text for kw in KEYWORDS)
 
-async def format_message(channel, msg):
+async def format_message(channel, msg) -> str:
     author = "—"
     try:
         sender = await msg.get_sender()
@@ -55,12 +54,15 @@ async def format_message(channel, msg):
             author = (sender.first_name or "") + " " + (sender.last_name or "")
             if getattr(sender, "username", None):
                 author += f" (@{sender.username})"
-    except:
+    except Exception:
         pass
     text_snippet = (msg.message[:700] + "...") if len(msg.message or "") > 700 else (msg.message or "")
     link = f"https://t.me/{channel}/{msg.id}" if getattr(msg, "id", None) else f"https://t.me/{getattr(msg.to_id, 'channel_id', '')}"
     return f"📍 {channel}\n👤 {author.strip()}\n🕒 {msg.date.strftime('%d.%m %H:%M')}\n\n{text_snippet}\n🔗 {link}"
 
+# =============================
+# Проверка истории каналов
+# =============================
 async def check_history():
     found_messages = []
     for channel in CHANNELS:
@@ -73,16 +75,15 @@ async def check_history():
                     found_messages.append(formatted)
             await asyncio.sleep(1 + random.random()*2)
         except errors.FloodWaitError as e:
-            print(f"⏳ FloodWait {e.seconds}s для {channel}")
+            print(f"⏳ FloodWait {e.seconds}s для {channel}, спим...")
             await asyncio.sleep(e.seconds + 5)
         except Exception as e:
             print(f"❌ Ошибка при обработке {channel}: {e}")
             await asyncio.sleep(2)
     if found_messages:
         batch_message = "\n\n---\n\n".join(found_messages)
-        target = int(CHAT_ID) if CHAT_ID else 'me'
         try:
-            await client.send_message(target, batch_message)
+            await client.send_message('me', batch_message)
             print(f"✅ История: отправлено {len(found_messages)} сообщений.")
         except Exception as e:
             print(f"❌ Ошибка отправки сообщений из истории: {e}")
@@ -90,27 +91,38 @@ async def check_history():
 # =============================
 # Основной цикл
 # =============================
-async def main_loop():
+async def main():
+    await client.start(bot_token=BOT_TOKEN)
+    me = await client.get_me()
+    BOT_NAME = me.username or me.first_name
+    print(f"🚀 SurfHunter Bot запущен. Имя бота: {BOT_NAME}")
+
+    # Проверяем историю сразу
     await check_history()
 
+    # Слушаем новые сообщения
     @client.on(events.NewMessage(chats=CHANNELS))
     async def handler(event):
-        if contains_keyword(event.message.message):
+        text = event.message.message
+        if contains_keyword(text):
             formatted = await format_message(event.chat.username or event.chat.title, event.message)
-            target = int(CHAT_ID) if CHAT_ID else 'me'
             try:
-                await client.send_message(target, formatted)
-                print(f"✅ Новое сообщение из {event.chat.title}")
+                await client.send_message('me', formatted)
+                print(f"✅ Новое сообщение из {event.chat.title} через @{BOT_NAME}")
             except Exception as e:
                 print(f"❌ Ошибка отправки нового сообщения: {e}")
 
+    # Периодический цикл
     while True:
+        print(f"🕒 Цикл проверки завершен. Следующая проверка через {CHECK_INTERVAL_HOURS*60:.0f} минут.")
         await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
-        await check_history()
 
 # =============================
-# Запуск Telethon без asyncio.run()
+# Старт
 # =============================
-with client:
-    client.loop.create_task(main_loop())
-    client.run_until_disconnected()
+if __name__ == "__main__":
+    try:
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(main())
+    except KeyboardInterrupt:
+        print("Stopped by user")
