@@ -18,7 +18,7 @@ from telethon.errors import FloodWaitError, RPCError
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 # SESSION_STRING для Brovado аккаунта
-SESSION_STRING = "1BVtsOIoBuxCe7thKx-Y-pjd0H8CUfDphH9dKmXGVIc6Fsc8bS_rICPzk71UXhEew43O49sQ8iQct2-VQtU2iSBbBBLEyaQYF-RO9TnVSe4TQrtLJ-KHZr8693BCkgdNEPnA2x87HvjruVtdbFcIZ7CndwYT5UkC6dlh808wsyaf6mBEmAAW8YUWY7l7uW8S7LKiMU_vOo2T1dAGTyhukiigKSd1NkcQI5chR1Nbi4p9LqU5Of2xk1Ikx4at3afuFbeW-yR1a9E1IoDjs6QBIZEon1-MHSq4CPLIhjBAWGQdixAWvtbIzyz0GTORMyRhTifaXoYI-IQMiJM8f5j2M3Vksv5LK0wo="
+SESSION_STRING = "1BVtsOIoBu1i059vn47kAQ12c8EOBo5hHiflKSRd4v2Z-UzV5_4wvAOpXLFXXVF6fA4crbrWgqQwKpEMYnMo4OPEvaqnfiNy4AA5sPUmuPCv4v5zHVr6kKledFF7h_yCfskGBKT2_k0QXvbB1wguO2U6GXmkr0JgqqjCj_dGi_GOG9-bw3kt3zoScCjfFGyJVZQvXscakr4DqRXC9niiOgEJdIoIttK41TvB-EEwNB4BBkLqmliKNcn1XWEGz36XWxZpYB3CuR2y_FFb4vT9mMJY-EG1-OIglsFo3Yi_gtTptPOL8jfevpoJqcUvi5yx2udhJbYPuHTYqlsQhZkc3781F6A66STw="
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID")  # numeric id куда бот шлет (личка)
 CHECK_INTERVAL_HOURS = float(os.getenv("CHECK_INTERVAL_HOURS", "1"))
