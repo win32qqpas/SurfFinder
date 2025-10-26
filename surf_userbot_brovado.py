@@ -2,6 +2,10 @@
 # surf_userbot_brovado.py
 # Userbot (Telethon) — мониторит группы и шлет уведомления SurfHanter
 
+#!/usr/bin/env python3
+# surf_userbot_brovado.py
+# Userbot (Telethon) — мониторит группы и отправляет уведомления через Bot API (SurfHanter).
+
 import os
 import sys
 import json
@@ -10,20 +14,20 @@ import aiohttp
 from datetime import datetime, timedelta, timezone
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.errors import FloodWaitError
+from telethon.errors import FloodWaitError, RPCError
 
 # ------------------------
-# ENV
+# Настройки / ENV
 # ------------------------
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
-SESSION_STRING = os.getenv("SESSION_STRING")  # Maison Brovado
-BOT_TOKEN = os.getenv("BOT_TOKEN")           # SurfHanter
-OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID")   # куда бот шлет уведомления
+SESSION_STRING = os.getenv("SESSION_STRING")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID")  # numeric id куда бот шлет (личка)
 CHECK_INTERVAL_HOURS = float(os.getenv("CHECK_INTERVAL_HOURS", "1"))
-TZ_OFFSET = int(os.getenv("TZ_OFFSET", "8"))  # Бали +8
+TZ_OFFSET = int(os.getenv("TZ_OFFSET", "8"))  # Бали = +8
 
-# Проверка ENV
+# Проверка env
 missing = [k for k, v in {
     "API_ID": API_ID, "API_HASH": API_HASH,
     "SESSION_STRING": SESSION_STRING, "BOT_TOKEN": BOT_TOKEN,
@@ -57,7 +61,7 @@ HISTORY_CHECK_LIMIT = 100
 SEEN_FILE = "seen_ids.json"
 
 # ------------------------
-# Время
+# Временные помощники
 # ------------------------
 UTC = timezone.utc
 def local_now():
@@ -70,12 +74,12 @@ def local_datetime_str():
     return local_now().strftime("%d.%m %H:%M")
 
 # ------------------------
-# Telethon client
+# Telethon клиент (userbot)
 # ------------------------
 client = TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH)
 
 # ------------------------
-# Bot API
+# Bot API (для уведомлений)
 # ------------------------
 BOT_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
@@ -96,7 +100,7 @@ async def bot_send_text(text):
                 print(f"[{local_time_str()}] ⚠️ Error sending bot message: {e}")
 
 # ------------------------
-# Seen IDs
+# Сохранение/загрузка seen ids
 # ------------------------
 def load_seen():
     try:
@@ -118,6 +122,7 @@ def save_seen(seen_set):
         print(f"[{local_time_str()}] ⚠️ Error save seen file: {e}")
 
 SEEN = load_seen()
+
 def mark_seen(chat_id, msg_id):
     key = f"{chat_id}:{msg_id}"
     if key not in SEEN:
@@ -127,13 +132,16 @@ def mark_seen(chat_id, msg_id):
     return False
 
 # ------------------------
-# Утилиты
+# Проверка ключевых слов
 # ------------------------
 def contains_keyword(text):
     if not text:
         return False
     t = text.lower()
-    return any(kw in t for kw in KEYWORDS)
+    for kw in KEYWORDS:
+        if kw in t:
+            return True
+    return False
 
 async def format_message(chat_identifier, msg):
     author = "—"
@@ -154,13 +162,17 @@ async def format_message(chat_identifier, msg):
             link = f"https://t.me/{ent.username}/{msg.id}"
     except Exception:
         ch_name = str(chat_identifier)
-    return f"📍 {ch_name}\n👤 {author.strip()}\n🕒 {local_datetime_str()}\n\n{text_snippet}\n{link}"
+    header = f"📍 {ch_name}\n👤 {author.strip()}\n🕒 {local_datetime_str()}\n\n"
+    body = f"{text_snippet}\n"
+    if link:
+        body += f"🔗 {link}"
+    return header + body
 
 # ------------------------
-# Проверка истории
+# Проверка истории при старте
 # ------------------------
 async def check_history_and_send():
-    print(f"[{local_time_str()}] 🔎 Проверка истории ({len(CHAT_IDS)} чатов)...")
+    print(f"[{local_time_str()}] 🔎 Проверка истории ({len(CHAT_IDS)} чатов, {HISTORY_CHECK_LIMIT} сообщений)...")
     found = []
     for ch in CHAT_IDS:
         try:
@@ -176,10 +188,13 @@ async def check_history_and_send():
             await asyncio.sleep(e.seconds + 5)
         except Exception as e:
             print(f"[{local_time_str()}] ⚠️ Ошибка чтения истории {ch}: {e}")
+
     if found:
         batch = "\n\n---\n\n".join(found)
         await bot_send_text(f"🌊 Найдено совпадений в истории ({len(found)}):\n\n{batch}")
-        print(f"[{local_time_str()}] ✅ Отправлено {len(found)} найденных сообщений.")
+        print(f"[{local_time_str()}] ✅ Отправлено {len(found)} найденных сообщений из истории.")
+    else:
+        print(f"[{local_time_str()}] 😴 Совпадений в истории не найдено.")
 
 # ------------------------
 # Handler новых сообщений
@@ -190,4 +205,61 @@ async def new_message_handler(event):
         text = event.message.message or ""
         chat_id = event.chat_id
         preview = text[:120].replace("\n", " ")
-        print(f"[{local_time_str()}] 🆕 Новое
+        print(f"[{local_time_str()}] 🆕 Новое сообщение ({chat_id}): {preview}")
+        if contains_keyword(text):
+            if mark_seen(chat_id, event.message.id):
+                formatted = await format_message(chat_id, event.message)
+                await bot_send_text(formatted)
+                print(f"[{local_time_str()}] ✅ Совпадение отправлено.")
+            else:
+                print(f"[{local_time_str()}] ℹ️ Совпадение уже было отправлено ранее.")
+    except Exception as e:
+        print(f"[{local_time_str()}] ⚠️ Ошибка в обработчике новых сообщений: {e}")
+
+# ------------------------
+# Периодический пинг
+# ------------------------
+async def periodic_ping():
+    while True:
+        await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
+        try:
+            await bot_send_text(f"🏄‍♂️ SurfHunter ONLINE — {local_time_str()}")
+            print(f"[{local_time_str()}] ⏱️ Пинг отправлен.")
+        except Exception as e:
+            print(f"[{local_time_str()}] ⚠️ Ошибка при отправке пинга: {e}")
+
+# ------------------------
+# Main — старт клиента и уведомление о старте
+# ------------------------
+async def main():
+    try:
+        print(f"[{local_time_str()}] 🚀 Старт Telethon userbot...")
+        await client.start()
+        me = await client.get_me()
+        display_name = me.first_name or me.username or str(me.id)
+        print(f"[{local_time_str()}] ✅ User account started: {display_name}")
+
+        # Стартовое сообщение
+        try:
+            start_msg = (
+                f"😈 {display_name} - ПОДКЛЮЧЁН К ЭФИРУ ! - {local_time_str()}\n"
+                f"🫡 ГОТОВ НЕСТИ МИССИЮ !\n"
+                f"🌊 Волны чекаю, все стабильно !\n"
+                f"⏱️ Время выхода в АСТРАЛ : {local_datetime_str()}"
+            )
+            await bot_send_text(start_msg)
+            print(f"[{local_time_str()}] 📩 Стартовое уведомление отправлено SurfHanter-ботом.")
+        except Exception as e:
+            print(f"[{local_time_str()}] ⚠️ Ошибка при отправке стартового уведомления: {e}")
+
+        # Проверка истории
+        await check_history_and_send()
+
+        # Фоновый пинг
+        asyncio.create_task(periodic_ping())
+
+        # Прослушивание сообщений
+        await client.run_until_disconnected()
+
+    except FloodWaitError as e:
+        print(f"[{local_time_str()}] ⏳ FloodWait (
