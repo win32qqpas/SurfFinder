@@ -202,4 +202,40 @@ async def new_message_handler(event):
                 print(f"[{local_time_str()}] ✅ Совпадение отправлено.")
             else:
                 print(f"[{local_time_str()}] ℹ️ Совпадение уже было отправлено ранее.")
-    except Exception
+    except Exception as e:
+        print(f"[{local_time_str()}] ⚠️ Ошибка в обработчике новых сообщений: {e}")
+
+# ------------------------
+# Периодический пинг
+# ------------------------
+async def periodic_ping():
+    while True:
+        await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
+        try:
+            await bot_send_text(f"🏄‍♂️ SurfHunter ONLINE — {local_time_str()}")
+            print(f"[{local_time_str()}] ⏱️ Пинг отправлен.")
+        except Exception as e:
+            print(f"[{local_time_str()}] ⚠️ Ошибка при отправке пинга: {e}")
+
+# ------------------------
+# Main
+# ------------------------
+async def main():
+    try:
+        print(f"[{local_time_str()}] 🚀 Старт Telethon userbot...")
+        await client.start()
+        me = await client.get_me()
+        display_name = me.first_name or me.username or str(me.id)
+        print(f"[{local_time_str()}] ✅ User account started: {display_name}")
+
+        start_msg = (
+            f"😈 {display_name} - ПОДКЛЮЧЁН К ЭФИРУ ! - {local_time_str()}\n"
+            f"🫡 ГОТОВ НЕСТИ МИССИЮ !\n"
+            f"🌊 Волны чекаю, все стабильно !\n"
+            f"⏱️ Время выхода в АСТРАЛ : {local_datetime_str()}"
+        )
+        await bot_send_text(start_msg)
+        print(f"[{local_time_str()}] 📩 Стартовое уведомление отправлено SurfHanter-ботом.")
+
+        await check_history_and_send()
+       
