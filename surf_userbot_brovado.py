@@ -13,21 +13,21 @@ from telethon.sessions import StringSession
 from telethon.errors import FloodWaitError, RPCError
 
 # ------------------------
-# Настройки / ENV
+# Настройки
 # ------------------------
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
-SESSION_STRING = os.getenv("SESSION_STRING")
+# SESSION_STRING для Brovado аккаунта
+SESSION_STRING = "1BVtsOIoBuxCe7thKx-Y-pjd0H8CUfDphH9dKmXGVIc6Fsc8bS_rICPzk71UXhEew43O49sQ8iQct2-VQtU2iSBbBBLEyaQYF-RO9TnVSe4TQrtLJ-KHZr8693BCkgdNEPnA2x87HvjruVtdbFcIZ7CndwYT5UkC6dlh808wsyaf6mBEmAAW8YUWY7l7uW8S7LKiMU_vOo2T1dAGTyhukiigKSd1NkcQI5chR1Nbi4p9LqU5Of2xk1Ikx4at3afuFbeW-yR1a9E1IoDjs6QBIZEon1-MHSq4CPLIhjBAWGQdixAWvtbIzyz0GTORMyRhTifaXoYI-IQMiJM8f5j2M3Vksv5LK0wo="
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID")  # numeric id куда бот шлет (личка)
 CHECK_INTERVAL_HOURS = float(os.getenv("CHECK_INTERVAL_HOURS", "1"))
 TZ_OFFSET = int(os.getenv("TZ_OFFSET", "8"))  # Бали = +8
 
-# Проверка env
+# Проверка обязательных переменных
 missing = [k for k, v in {
     "API_ID": API_ID, "API_HASH": API_HASH,
-    "SESSION_STRING": SESSION_STRING, "BOT_TOKEN": BOT_TOKEN,
-    "OWNER_CHAT_ID": OWNER_CHAT_ID
+    "BOT_TOKEN": BOT_TOKEN, "OWNER_CHAT_ID": OWNER_CHAT_ID
 }.items() if not v]
 
 if missing:
@@ -50,7 +50,7 @@ KEYWORDS = [
     "сёрф","серф","инструктор по серфингу","серфурок","уроки серфинга","уроки сёрфинга",
     "сёрфтренер","сёрфкемп","занятия по сёрфингу","тренера по серфингу","тренер по серфингу",
     "серфтренер","занятие по серфингу","серфкемп","ищу инструктора по серфингу","серфуроки",
-    "инструктор","инструкторсерф","surf","surfing","инструкторсерфинга"
+    "серф инструктор","сёрф тренер","surf","surfing","инструктор для серфинга"
 ]
 
 HISTORY_CHECK_LIMIT = 100
@@ -75,7 +75,7 @@ def local_datetime_str():
 client = TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH)
 
 # ------------------------
-# Bot API (для уведомлений SurfHanter)
+# Bot API
 # ------------------------
 BOT_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
@@ -96,7 +96,7 @@ async def bot_send_text(text):
                 print(f"[{local_time_str()}] ⚠️ Error sending bot message: {e}")
 
 # ------------------------
-# Сохранение/загрузка seen ids
+# Seen messages
 # ------------------------
 def load_seen():
     try:
@@ -128,7 +128,7 @@ def mark_seen(chat_id, msg_id):
     return False
 
 # ------------------------
-# Утилиты по тексту
+# Текстовые утилиты
 # ------------------------
 def contains_keyword(text):
     if not text:
