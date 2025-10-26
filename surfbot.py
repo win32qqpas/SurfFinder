@@ -5,19 +5,17 @@ from telethon import TelegramClient, events, errors
 from datetime import datetime
 
 # =============================
-# Проверка и загрузка переменных окружения
+# Переменные окружения
 # =============================
-API_ID = os.environ.get("API_ID")
+API_ID = int(os.environ.get("API_ID"))
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHECK_INTERVAL_HOURS = float(os.environ.get("CHECK_INTERVAL_HOURS", 0.75))
 
-if not API_ID or not API_HASH:
-    raise SystemExit("ERROR: API_ID или API_HASH не заданы.")
-if not BOT_TOKEN:
-    raise SystemExit("ERROR: BOT_TOKEN не задан.")
+if not (API_ID and API_HASH and BOT_TOKEN):
+    raise SystemExit("❌ ERROR: API_ID, API_HASH или BOT_TOKEN не заданы!")
 
-print("✅ API_ID, API_HASH и BOT_TOKEN найдены.")
+print("✅ Все ключи найдены. Стартуем...")
 
 # =============================
 # Каналы и ключевые слова
@@ -30,21 +28,23 @@ CHANNELS = [
 ]
 
 KEYWORDS = [
-    "серфинг","серфинга","серфингу","сёрфингу","сёрфинг","серфингом","сёрфингом","сёрф","серф",
-    "инструктор по серфингу","серфурок","уроки серфинга","уроки сёрфинга","сёрфтренер","сёрфкемп",
-    "занятия по сёрфингу","тренера по серфингу","тренер по серфингу","серфтренер","занятие по серфингу",
-    "серфкемп","ищу инструктора по серфингу"
+    "серфинг","серфинга","серфингу","сёрфингу","сёрфинг","серфингом","сёрфингом","сёрф",
+    "серф","инструктор по серфингу","серфурок","уроки серфинга","уроки сёрфинга",
+    "сёрфтренер","сёрфкемп","занятия по сёрфингу","тренера по серфингу","тренер по серфингу",
+    "серфтренер","занятие по серфингу","серфкемп","ищу инструктора по серфингу"
 ]
 
 # =============================
 # Инициализация клиента
 # =============================
-client = TelegramClient('bot_session', int(API_ID), API_HASH).start(bot_token=BOT_TOKEN)
+client = TelegramClient('bot_session', API_ID, API_HASH)
 
 # =============================
 # Вспомогательные функции
 # =============================
 def contains_keyword(text):
+    if not text:
+        return False
     text = text.lower()
     return any(kw.lower() in text for kw in KEYWORDS)
 
@@ -59,7 +59,7 @@ async def format_message(channel, msg):
     except Exception:
         pass
     text_snippet = (msg.message[:700] + "...") if len(msg.message or "") > 700 else (msg.message or "")
-    link = f"https://t.me/{channel}/{msg.id}" if getattr(msg, "id", None) else f"https://t.me/{getattr(msg.to_id, 'channel_id', '')}"
+    link = f"https://t.me/{channel}/{msg.id}" if getattr(msg, "id", None) else ""
     return f"📍 {channel}\n👤 {author.strip()}\n🕒 {msg.date.strftime('%d.%m %H:%M')}\n\n{text_snippet}\n🔗 {link}"
 
 # =============================
@@ -72,13 +72,13 @@ async def check_history():
             entity = await client.get_entity(channel)
             messages = await client.get_messages(entity, limit=100)
             for msg in messages:
-                if msg.message and contains_keyword(msg.message):
+                if contains_keyword(msg.message):
                     formatted = await format_message(channel, msg)
                     found_messages.append(formatted)
             await asyncio.sleep(1 + random.random()*2)
         except errors.FloodWaitError as e:
             print(f"⏳ FloodWait {e.seconds}s для {channel}, спим...")
-            await asyncio.sleep(e.seconds + 5)
+            await asyncio.sleep(e.seconds + 1)
         except Exception as e:
             print(f"❌ Ошибка при обработке {channel}: {e}")
             await asyncio.sleep(2)
@@ -94,14 +94,11 @@ async def check_history():
 # Основной цикл
 # =============================
 async def main():
-    await client.start()
+    await client.start(bot_token=BOT_TOKEN)
     me = await client.get_me()
     print(f"🚀 SurfHunter Bot запущен. Имя бота: {me.username or me.first_name}")
-    
-    # Отправка сообщения себе при старте
-    await client.send_message('me', "✅ SurfHunter Bot успешно запущен!")
 
-    # Проверяем историю сразу
+    # Проверка истории сразу
     await check_history()
 
     # Слушаем новые сообщения
@@ -128,4 +125,8 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("Stopped by user")
+        print("🛑 Остановлено пользователем")
+    except errors.FloodWaitError as e:
+        print(f"⏳ FloodWait: {e.seconds} секунд")
+    except Exception as e:
+        print(f"❌ Ошибка: {e}")
