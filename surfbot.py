@@ -6,7 +6,7 @@ from telethon.sessions import StringSession
 from datetime import datetime, timezone
 
 # =============================
-# Проверка и загрузка переменных окружения
+# Переменные окружения
 # =============================
 SESSION_STRING = os.environ.get("SESSION_STRING")
 API_ID = os.environ.get("API_ID")
@@ -61,50 +61,4 @@ async def format_message(channel, msg):
         pass
     text_snippet = (msg.message[:700] + "...") if len(msg.message or "") > 700 else (msg.message or "")
     link = f"https://t.me/{channel}/{msg.id}" if getattr(msg, "id", None) else f"https://t.me/{getattr(msg.to_id, 'channel_id', '')}"
-    return f"📍 {channel}\n👤 {author.strip()}\n🕒 {msg.date.strftime('%d.%m %H:%M')}\n\n{text_snippet}\n🔗 {link}"
-
-# =============================
-# Основной цикл
-# =============================
-async def main():
-    await client.start()
-    me = await client.get_me()
-    print(f"🚀 SurfFinder запущен. Аккаунт: {me.username or me.first_name}")
-
-    while True:
-        start_time = datetime.now(timezone.utc)
-        found_messages = []
-
-        for channel in CHANNELS:
-            try:
-                entity = await client.get_entity(channel)
-                messages = await client.get_messages(entity, limit=100)  # <-- изменено с 50 на 100
-                for msg in messages:
-                    if msg.message and contains_keyword(msg.message):
-                        formatted = await format_message(channel, msg)
-                        found_messages.append(formatted)
-                await asyncio.sleep(1 + random.random()*2)
-
-            except errors.FloodWaitError as e:
-                print(f"⏳ FloodWait {e.seconds}s для {channel}, спим...")
-                await asyncio.sleep(e.seconds + 5)
-            except Exception as e:
-                print(f"❌ Ошибка при обработке {channel}: {e}")
-                await asyncio.sleep(2)
-
-        if found_messages:
-            batch_message = "\n\n---\n\n".join(found_messages)
-            try:
-                await client.send_message('me', batch_message)
-                print(f"✅ Отправлено {len(found_messages)} сообщений.")
-            except Exception as e:
-                print(f"❌ Ошибка отправки сообщений: {e}")
-
-        elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
-        print(f"🕒 Цикл завершен. Найдено {len(found_messages)} сообщений. Время: {elapsed:.1f}s. Следующая проверка через {CHECK_INTERVAL_HOURS*60:.0f} минут.")
-        await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
-
-# =============================
-# Старт
-# =============================
-if
+    return f"📍 {channel}\n👤 {author.strip()}\n🕒 {msg.date.strftime('%d.%m %H:%
