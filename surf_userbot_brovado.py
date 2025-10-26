@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
 # surf_userbot_brovado.py
-# Userbot (Telethon) — мониторит группы и шлет уведомления SurfHanter
-
-#!/usr/bin/env python3
-# surf_userbot_brovado.py
 # Userbot (Telethon) — мониторит группы и отправляет уведомления через Bot API (SurfHanter).
 
 import os
