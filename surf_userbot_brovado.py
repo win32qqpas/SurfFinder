@@ -10,7 +10,7 @@ import aiohttp
 from datetime import datetime, timedelta, timezone
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.errors import FloodWaitError, RPCError
+from telethon.errors import FloodWaitError
 
 # ------------------------
 # Настройки / ENV
@@ -53,8 +53,8 @@ KEYWORDS = [
     "инструктор","инструкторсерф","surf","surfing","инструкторсерфинга"
 ]
 
-HISTORY_CHECK_LIMIT = 100  # сколько сообщений читать в истории при старте
-SEEN_FILE = "seen_ids.json"  # где сохраняем уже обработанные сообщения
+HISTORY_CHECK_LIMIT = 100
+SEEN_FILE = "seen_ids.json"
 
 # ------------------------
 # Временные помощники
@@ -75,7 +75,7 @@ def local_datetime_str():
 client = TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH)
 
 # ------------------------
-# Bot API (для отправки уведомлений от SurfHanter)
+# Bot API (для отправки уведомлений)
 # ------------------------
 BOT_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
@@ -96,7 +96,7 @@ async def bot_send_text(text):
                 print(f"[{local_time_str()}] ⚠️ Error sending bot message: {e}")
 
 # ------------------------
-# Сохранение/загрузка seen ids
+# Seen messages
 # ------------------------
 def load_seen():
     try:
@@ -128,16 +128,13 @@ def mark_seen(chat_id, msg_id):
     return False
 
 # ------------------------
-# Утилиты по тексту
+# Текстовые утилиты
 # ------------------------
 def contains_keyword(text):
     if not text:
         return False
     t = text.lower()
-    for kw in KEYWORDS:
-        if kw in t:
-            return True
-    return False
+    return any(kw in t for kw in KEYWORDS)
 
 async def format_message(chat_identifier, msg):
     author = "—"
@@ -158,14 +155,10 @@ async def format_message(chat_identifier, msg):
             link = f"https://t.me/{ent.username}/{msg.id}"
     except Exception:
         ch_name = str(chat_identifier)
-    header = f"📍 {ch_name}\n👤 {author.strip()}\n🕒 {local_datetime_str()}\n\n"
-    body = f"{text_snippet}\n"
-    if link:
-        body += f"🔗 {link}"
-    return header + body
+    return f"📍 {ch_name}\n👤 {author.strip()}\n🕒 {local_datetime_str()}\n\n{text_snippet}\n{('🔗 ' + link) if link else ''}"
 
 # ------------------------
-# Проверка истории при старте
+# Проверка истории
 # ------------------------
 async def check_history_and_send():
     print(f"[{local_time_str()}] 🔎 Проверка истории ({len(CHAT_IDS)} чатов, {HISTORY_CHECK_LIMIT} сообщений)...")
@@ -193,7 +186,7 @@ async def check_history_and_send():
         print(f"[{local_time_str()}] 😴 Совпадений в истории не найдено.")
 
 # ------------------------
-# Handler новых сообщений
+# Новые сообщения
 # ------------------------
 @client.on(events.NewMessage(chats=CHAT_IDS))
 async def new_message_handler(event):
@@ -209,52 +202,4 @@ async def new_message_handler(event):
                 print(f"[{local_time_str()}] ✅ Совпадение отправлено.")
             else:
                 print(f"[{local_time_str()}] ℹ️ Совпадение уже было отправлено ранее.")
-    except Exception as e:
-        print(f"[{local_time_str()}] ⚠️ Ошибка в обработчике новых сообщений: {e}")
-
-# ------------------------
-# Периодический пинг
-# ------------------------
-async def periodic_ping():
-    while True:
-        await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
-        try:
-            await bot_send_text(f"🏄‍♂️ SurfHunter ONLINE — {local_time_str()}")
-            print(f"[{local_time_str()}] ⏱️ Пинг отправлен.")
-        except Exception as e:
-            print(f"[{local_time_str()}] ⚠️ Ошибка при отправке пинга: {e}")
-
-# ------------------------
-# Main — старт клиента и уведомление о старте
-# ------------------------
-async def main():
-    try:
-        print(f"[{local_time_str()}] 🚀 Старт Telethon userbot...")
-        await client.start()
-        me = await client.get_me()
-        display_name = me.first_name or me.username or str(me.id)
-        print(f"[{local_time_str()}] ✅ User account started: {display_name}")
-
-        # Стартовое сообщение
-        start_msg = (
-            f"😈 {display_name} - ПОДКЛЮЧЁН К ЭФИРУ ! - {local_time_str()}\n"
-            f"🫡 ГОТОВ НЕСТИ МИССИЮ !\n"
-            f"🌊 Волны чекаю, все стабильно !\n"
-            f"⏱️ Время выхода в АСТРАЛ : {local_datetime_str()}"
-        )
-        await bot_send_text(start_msg)
-        print(f"[{local_time_str()}] 📩 Стартовое уведомление отправлено SurfHanter-ботом.")
-
-        # Проверка истории один раз
-        await check_history_and_send()
-
-        # Запуск фонового пинга
-        asyncio.create_task(periodic_ping())
-
-        # Запуск loop для прослушивания новых сообщений
-        await client.run_until_disconnected()
-
-    except FloodWaitError as e:
-        print(f"[{local_time_str()}] ⏳ FloodWait (main): {e.seconds}s — спим...")
-        await asyncio.sleep(e.seconds + 5)
-        os.execv(sys
+    except Exception
