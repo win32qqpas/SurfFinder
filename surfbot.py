@@ -7,16 +7,20 @@ from datetime import datetime, timezone
 # =============================
 # Проверка и загрузка переменных окружения
 # =============================
+API_ID = os.environ.get("API_ID")
+API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHECK_INTERVAL_HOURS = float(os.environ.get("CHECK_INTERVAL_HOURS", 0.75))
-CHAT_ID = os.environ.get("CHAT_ID")  # сюда бот будет отправлять сообщения
+CHAT_ID = os.environ.get("CHAT_ID")  # Можно использовать для отправки сообщений напрямую
 
+if not API_ID or not API_HASH:
+    raise SystemExit("ERROR: API_ID или API_HASH не заданы. Добавь их в Environment Variables.")
 if not BOT_TOKEN:
     raise SystemExit("ERROR: BOT_TOKEN не задан. Создай бота через BotFather и добавь токен в Environment Variables.")
-if not CHAT_ID:
-    raise SystemExit("ERROR: CHAT_ID не задан. Добавь ID чата или @username в Environment Variables.")
 
-print("✅ BOT_TOKEN найден. CHAT_ID =", CHAT_ID)
+API_ID = int(API_ID)  # Обязательно конвертируем в число
+
+print("✅ API_ID, API_HASH и BOT_TOKEN найдены.")
 
 # =============================
 # Каналы и ключевые слова
@@ -38,7 +42,7 @@ KEYWORDS = [
 # =============================
 # Инициализация клиента
 # =============================
-client = TelegramClient('bot_session', 0, '').start(bot_token=BOT_TOKEN)
+client = TelegramClient('bot_session', API_ID, API_HASH).start(bot_token=BOT_TOKEN)
 
 # =============================
 # Вспомогательные функции
@@ -69,7 +73,7 @@ async def check_history():
     for channel in CHANNELS:
         try:
             entity = await client.get_entity(channel)
-            messages = await client.get_messages(entity, limit=100)  # лимит 100 сообщений
+            messages = await client.get_messages(entity, limit=100)  # теперь 100 сообщений
             for msg in messages:
                 if msg.message and contains_keyword(msg.message):
                     formatted = await format_message(channel, msg)
@@ -81,10 +85,14 @@ async def check_history():
         except Exception as e:
             print(f"❌ Ошибка при обработке {channel}: {e}")
             await asyncio.sleep(2)
+
     if found_messages:
         batch_message = "\n\n---\n\n".join(found_messages)
         try:
-            await client.send_message(CHAT_ID, batch_message)
+            if CHAT_ID:
+                await client.send_message(int(CHAT_ID), batch_message)
+            else:
+                await client.send_message('me', batch_message)
             print(f"✅ История: отправлено {len(found_messages)} сообщений.")
         except Exception as e:
             print(f"❌ Ошибка отправки сообщений из истории: {e}")
@@ -107,7 +115,10 @@ async def main():
         if contains_keyword(text):
             formatted = await format_message(event.chat.username or event.chat.title, event.message)
             try:
-                await client.send_message(CHAT_ID, formatted)
+                if CHAT_ID:
+                    await client.send_message(int(CHAT_ID), formatted)
+                else:
+                    await client.send_message('me', formatted)
                 print(f"✅ Новое сообщение из {event.chat.title}")
             except Exception as e:
                 print(f"❌ Ошибка отправки нового сообщения: {e}")
