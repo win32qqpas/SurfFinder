@@ -1,95 +1,69 @@
 import os
 import asyncio
 from datetime import datetime
-from telethon import TelegramClient
-from telethon.errors import FloodWaitError, AccessTokenExpiredError, RPCError
+from telethon import TelegramClient, events, errors
 
-# === Загрузка переменных окружения (Render Dashboard → Environment) ===
+# === Получаем переменные окружения ===
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
+CHECK_INTERVAL_HOURS = float(os.getenv("CHECK_INTERVAL_HOURS", "1"))
 
-print("🌴 Проверка переменных окружения:")
-print(f"API_ID: {API_ID}")
-print(f"API_HASH: {'✅ есть' if API_HASH else '❌ нет'}")
-print(f"BOT_TOKEN: {'✅ есть' if BOT_TOKEN else '❌ нет'}")
-print(f"CHAT_ID: {CHAT_ID if CHAT_ID else '❌ нет'}")
-print("=====================================")
-
+# === Проверяем ключи ===
+print("🔍 Проверка переменных окружения...")
 if not all([API_ID, API_HASH, BOT_TOKEN, CHAT_ID]):
-    print("❌ Ошибка: не заданы все переменные окружения!")
-    print("Проверь Render → Environment → API_ID, API_HASH, BOT_TOKEN, CHAT_ID")
-    exit(1)
+    print("❌ Ошибка: не найдены все ключи (API_ID, API_HASH, BOT_TOKEN, CHAT_ID)")
+    raise SystemExit("⛔️ Завершено: отсутствуют необходимые ключи.")
+print("✅ Все ключи найдены. Стартуем...\n")
 
-API_ID = int(API_ID)
+# === Инициализация клиента ===
+client = TelegramClient("surfbot_session", int(API_ID), API_HASH)
 
-# === Основная функция ===
-async def start_bot():
-    client = TelegramClient("surf_session", API_ID, API_HASH)
-
+async def notify_startup():
+    """Отправка уведомления о запуске"""
     try:
-        print(f"\n🌊 [{datetime.now().strftime('%H:%M:%S')}] Подключаемся к Telegram...")
-        await client.start(bot_token=BOT_TOKEN)
-
-        me = await client.get_me()
-        print(f"✅ Бот @{me.username} запущен и готов к волнам.")
-
-        # Сообщаем в Telegram, что бот стартовал
-        start_msg = f"🚀 Бот @{me.username} запущен и онлайн 🌴\n⏰ {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
-        await client.send_message(CHAT_ID, start_msg)
-        print("📩 Уведомление о старте отправлено в Telegram.")
-
-        # === Основной цикл ===
-        while True:
-            try:
-                # Каждые 60 минут сообщает, что жив
-                await asyncio.sleep(3600)
-                await client.send_message(CHAT_ID, f"🌊 Всё под контролем! Бот онлайн ✅\n{datetime.now().strftime('%H:%M:%S')}")
-                print(f"📨 [{datetime.now().strftime('%H:%M:%S')}] Сообщение о статусе отправлено.")
-
-            except FloodWaitError as e:
-                print(f"⚠️ FloodWait: ждём {e.seconds} секунд.")
-                await asyncio.sleep(e.seconds + 5)
-            except Exception as e:
-                print(f"💥 Ошибка в цикле: {e}")
-                await client.send_message(CHAT_ID, f"⚠️ Ошибка в работе бота:\n`{type(e).__name__}: {e}`\n⏰ {datetime.now().strftime('%H:%M:%S')}")
-                await asyncio.sleep(60)
-
-    except FloodWaitError as e:
-        print(f"⏳ FloodWait: пауза {e.seconds} секунд.")
-        await asyncio.sleep(e.seconds + 5)
-        await start_bot()
-
-    except AccessTokenExpiredError:
-        print("❌ Токен бота просрочен. Обнови его через @BotFather.")
-        try:
-            await client.send_message(CHAT_ID, "❌ Токен бота истёк. Обнови его в @BotFather.")
-        except:
-            pass
-        await asyncio.sleep(3600)
-        await start_bot()
-
+        await client.send_message(int(CHAT_ID),
+            f"🚀 SurfBot запущен и активен!\n⏰ {datetime.now().strftime('%d.%m %H:%M')}")
+        print("📨 Уведомление о запуске отправлено.")
+    except errors.FloodWaitError as e:
+        print(f"⏳ FloodWait: подождем {e.seconds} секунд...")
+        await asyncio.sleep(e.seconds)
     except Exception as e:
-        print(f"💥 Критическая ошибка: {type(e).__name__}: {e}")
+        print(f"⚠️ Ошибка при отправке уведомления: {e}")
+
+async def periodic_check():
+    """Проверка статуса каждые CHECK_INTERVAL_HOURS часов"""
+    interval = CHECK_INTERVAL_HOURS * 3600
+    while True:
         try:
-            await client.send_message(CHAT_ID, f"💥 Критическая ошибка:\n`{type(e).__name__}: {e}`\n⏰ {datetime.now().strftime('%H:%M:%S')}")
-        except:
-            print("⚠️ Не удалось отправить сообщение об ошибке.")
-        await asyncio.sleep(120)
-        await start_bot()
+            await client.send_message(int(CHAT_ID),
+                f"🤙 SurfBot всё ещё активен!\nВремя: {datetime.now().strftime('%d.%m %H:%M')}")
+            print(f"✅ Сообщение о проверке отправлено ({datetime.now().strftime('%H:%M')})")
+        except Exception as e:
+            print(f"⚠️ Ошибка при отправке проверки: {e}")
+        await asyncio.sleep(interval)
 
-    finally:
-        await client.disconnect()
-        print("🔌 Соединение закрыто.")
+@client.on(events.NewMessage)
+async def handle_message(event):
+    """Обработка входящих сообщений"""
+    text = event.message.message.lower()
+    if "ping" in text:
+        await event.respond("🏄‍♂️ pong! Я на волне 🌊")
 
+async def main():
+    await client.start(bot_token=BOT_TOKEN)
+    me = await client.get_me()
+    print(f"🤖 Бот {me.username} запущен в {datetime.now().strftime('%d.%m %H:%M')}")
 
-# === Точка входа ===
+    await notify_startup()
+    asyncio.create_task(periodic_check())
+    await client.run_until_disconnected()
+
 if __name__ == "__main__":
-    print("🚀 Запуск SurfHunter Bot...")
     try:
-        asyncio.run(start_bot())
+        asyncio.run(main())
     except KeyboardInterrupt:
-        print("🛑 Остановлено вручную.")
+        print("🛑 SurfBot остановлен вручную.")
     except Exception as e:
-        print(f"⚠️ Глобальная ошибка: {e}")
+        print(f"💥 Критическая ошибка: {e}")
