@@ -1,218 +1,401 @@
+#!/usr/bin/env python3
+# main.py — SurfHunter userbot (Telethon) — улучшенная версия
+# Динамический мониторинг всех групп, где сидит аккаунт.
+# Отправка уведомлений в личку через Bot API.
+
 import os
 import sys
+import json
+import random
 import asyncio
+import aiohttp
 from datetime import datetime, timedelta, timezone
-from telethon import TelegramClient, events
-from telethon.errors import FloodWaitError
+from telethon import TelegramClient, events, utils
+from telethon.sessions import StringSession
+from telethon.errors import FloodWaitError, RPCError
 
-# =============================
-# Локальное время (GMT+8 — Бали)
-# =============================
-TZ_OFFSET = 8  # часы (Бали)
-
-def local_time():
-    return (datetime.now(timezone.utc) + timedelta(hours=TZ_OFFSET)).strftime('%H:%M')
-
-def local_datetime():
-    return (datetime.now(timezone.utc) + timedelta(hours=TZ_OFFSET)).strftime('%d.%m %H:%M')
-
-# =============================
-# Переменные окружения (Render)
-# =============================
+# ------------------------
+# Конфиг (берём из окружения)
+# ------------------------
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")  # твой личный ID (куда бот шлёт уведомления)
-CHECK_INTERVAL_HOURS = float(os.getenv("CHECK_INTERVAL_HOURS", "1").strip())
+SESSION_STRING = os.getenv("SESSION_STRING")  # Рекомендуется хранить в ENV
+BOT_TOKEN = "8438987254:AAHPW6Sq_Z2VmXOEx0DJ7WRWnZ1vfmdi0Ik"  # по просьбе пользователя
+OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID")  # numeric id (куда бот шлёт уведомления)
+CHECK_INTERVAL_HOURS = float(os.getenv("CHECK_INTERVAL_HOURS", "1"))  # пинг-онлайн
+HISTORY_CHECK_HOURS = float(os.getenv("HISTORY_CHECK_HOURS", "2"))  # каждые 2 часа проверять историю
+HISTORY_CHECK_LIMIT = int(os.getenv("HISTORY_CHECK_LIMIT", "100"))   # 100 сообщений в истории
+TZ_OFFSET = int(os.getenv("TZ_OFFSET", "8"))  # Бали = +8
+EXCLUDE_CHAT_IDS = os.getenv("EXCLUDE_CHAT_IDS", "")  # опционально: CSV исключённых id
+MAX_FORWARDS_PER_HOUR = int(os.getenv("MAX_FORWARDS_PER_HOUR", "40"))  # ограничение пересылаемых уведомлений/час
+SEEN_FILE = os.getenv("SEEN_FILE", "seen_ids.json")
 
-print("\n🔍 Проверяем переменные окружения:\n")
-print(f"API_ID = {API_ID}")
-print(f"API_HASH = {'✅ есть' if API_HASH else '❌ нет'}")
-print(f"BOT_TOKEN = {'✅ есть' if BOT_TOKEN else '❌ нет'}")
-print(f"CHAT_ID = {CHAT_ID}")
-print(f"CHECK_INTERVAL_HOURS = {CHECK_INTERVAL_HOURS}\n")
-
+# Проверка обязательных переменных
 missing = [k for k, v in {
-    "API_ID": API_ID, "API_HASH": API_HASH, "BOT_TOKEN": BOT_TOKEN, "CHAT_ID": CHAT_ID
+    "API_ID": API_ID, "API_HASH": API_HASH, "SESSION_STRING": SESSION_STRING,
+    "OWNER_CHAT_ID": OWNER_CHAT_ID
 }.items() if not v]
 
 if missing:
-    print(f"❌ Ошибка: отсутствуют ключи {', '.join(missing)}")
+    print("❌ Missing ENV vars:", missing)
     sys.exit(1)
-else:
-    print("✅ Все ключи найдены. Стартуем...\n")
 
-# =============================
-# Список чатов/каналов для мониторинга
-# =============================
-CHAT_IDS = [
-    -1001356532108,
-    -1002363500314,
-    -1001311121622,
-    -1001388027785,
-    -1001508876175,
-    -1001277376699,
-    -1001946343717,
-    -1001341855810,
-    -1001278212382,
-    -1001361144761,
-    -1001706773923,
-    -1001643118953,
-    -1001032422089,
-    -1001716678830,
-    -1001540608753,
-    -1001867725040,
-    -1001726137174,
-    -1002624129997,
-    -1002490371800   # 🔸 добавлен новый чат
-]
-
-# =============================
+# ------------------------
 # Ключевые слова
-# =============================
+# ------------------------
 KEYWORDS = [
     "серфинг","серфинга","серфингу","сёрфингу","сёрфинг","серфингом","сёрфингом",
     "сёрф","серф","инструктор по серфингу","серфурок","уроки серфинга","уроки сёрфинга",
     "сёрфтренер","сёрфкемп","занятия по сёрфингу","тренера по серфингу","тренер по серфингу",
     "серфтренер","занятие по серфингу","серфкемп","ищу инструктора по серфингу","серфуроки",
-    "инструктор","инструкторсерф","surf","surfing","инструкторсерфинга"
+    "серф инструктор","сёрф тренер","surf","surfing","инструктор для серфинга"
 ]
 
+# ------------------------
+# Временные помощники
+# ------------------------
+UTC = timezone.utc
+def local_now():
+    return datetime.now(UTC) + timedelta(hours=TZ_OFFSET)
+
+def local_time_str():
+    return local_now().strftime("%H:%M")
+
+def local_datetime_str():
+    return local_now().strftime("%d.%m %H:%M")
+
+# ------------------------
+# Клиенты
+# ------------------------
+client = TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH)
+
+BOT_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+
+# ------------------------
+# Seen messages (анти-дублирование)
+# ------------------------
+def load_seen():
+    try:
+        if os.path.exists(SEEN_FILE):
+            with open(SEEN_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return set(data) if isinstance(data, list) else set()
+        return set()
+    except Exception as e:
+        print(f"[{local_time_str()}] ⚠️ Error loading seen: {e}")
+        return set()
+
+def save_seen(seen_set):
+    try:
+        with open(SEEN_FILE, "w", encoding="utf-8") as f:
+            json.dump(list(seen_set), f, ensure_ascii=False)
+    except Exception as e:
+        print(f"[{local_time_str()}] ⚠️ Error saving seen: {e}")
+
+SEEN = load_seen()
+
+def mark_seen(chat_id, msg_id):
+    key = f"{chat_id}:{msg_id}"
+    if key not in SEEN:
+        SEEN.add(key)
+        # сохраняем асинхронно, но быстро
+        save_seen(SEEN)
+        return True
+    return False
+
+# ------------------------
+# Rate limiter: контролируем количество пересылок за час
+# ------------------------
+forwards_this_hour = 0
+forwards_reset_time = datetime.now(UTC)
+
+def allowed_forward():
+    global forwards_this_hour, forwards_reset_time
+    now = datetime.now(UTC)
+    if now >= forwards_reset_time + timedelta(hours=1):
+        forwards_reset_time = now
+        forwards_this_hour = 0
+    if forwards_this_hour < MAX_FORWARDS_PER_HOUR:
+        forwards_this_hour += 1
+        return True
+    return False
+
+# ------------------------
+# Утилиты текста и фильтра
+# ------------------------
 def contains_keyword(text):
     if not text:
         return False
-    lc = text.lower()
-    return any(kw in lc for kw in KEYWORDS)
+    t = text.lower()
+    for kw in KEYWORDS:
+        if kw in t:
+            return True
+    return False
 
-# =============================
-# Инициализация клиента
-# =============================
-client = TelegramClient("surf_session", int(API_ID), API_HASH)
-
-# =============================
-# Безопасная отправка сообщений
-# =============================
-async def send_message_safe(to_chat, text):
-    try:
-        await client.send_message(int(to_chat), text)
-        print(f"[{local_time()}] 📩 Отправлено: {text[:120]!s}")
-    except FloodWaitError as e:
-        wait = e.seconds + 5
-        print(f"[{local_time()}] ⏳ FloodWait {e.seconds} сек, ждём...")
-        await asyncio.sleep(wait)
-        await client.send_message(int(to_chat), text)
-    except Exception as e:
-        print(f"[{local_time()}] ⚠️ Ошибка отправки: {e}")
-
-# =============================
-# Форматирование найденных сообщений
-# =============================
-async def format_message(channel, msg):
+async def format_message(chat_identifier, msg):
     author = "—"
     try:
         sender = await msg.get_sender()
         if sender:
-            author = (sender.first_name or "") + " " + (sender.last_name or "")
+            author = " ".join(filter(None, [sender.first_name, sender.last_name])) or getattr(sender, "username", "—")
             if getattr(sender, "username", None):
                 author += f" (@{sender.username})"
     except Exception:
         pass
-
     text_snippet = (msg.message[:700] + "...") if len(msg.message or "") > 700 else (msg.message or "")
+    link = ""
+    ch_name = str(chat_identifier)
     try:
-        channel_username = (await client.get_entity(channel)).username
-        link = f"https://t.me/{channel_username}/{msg.id}" if channel_username else ""
+        ent = await client.get_entity(chat_identifier)
+        ch_name = ent.username or getattr(ent, "title", str(chat_identifier))
+        if getattr(ent, "username", None):
+            link = f"https://t.me/{ent.username}/{msg.id}"
     except Exception:
-        link = ""
+        pass
+    header = f"📍 {ch_name}\n👤 {author.strip()}\n🕒 {local_datetime_str()}\n\n"
+    body = f"{text_snippet}\n"
+    if link:
+        body += f"\n🔗 {link}"
+    return header + body
 
-    return f"📍 {channel}\n👤 {author.strip()}\n🕒 {local_datetime()}\n\n{text_snippet}\n🔗 {link}"
+# ------------------------
+# Отправка через Bot API с бэкоффом и chunking
+# ------------------------
+async def bot_send_text(text):
+    MAX = 3900
+    parts = [text[i:i+MAX] for i in range(0, len(text), MAX)]
+    async with aiohttp.ClientSession() as session:
+        for p in parts:
+            # рандомная человеческая пауза перед отправкой
+            await asyncio.sleep(random.uniform(0.4, 1.8))
+            payload = {"chat_id": int(OWNER_CHAT_ID), "text": p, "disable_web_page_preview": True}
+            backoff = 1
+            for attempt in range(5):
+                try:
+                    async with session.post(BOT_API_URL, json=payload, timeout=30) as resp:
+                        data = await resp.text()
+                        if resp.status == 200:
+                            print(f"[{local_time_str()}] 📩 Bot message sent (len {len(p)})")
+                            break
+                        else:
+                            print(f"[{local_time_str()}] ⚠️ Bot API {resp.status}: {data}")
+                            # при 429 стоит увеличить backoff
+                            await asyncio.sleep(backoff)
+                            backoff = min(backoff * 2, 60)
+                except Exception as e:
+                    print(f"[{local_time_str()}] ⚠️ Error sending bot message: {e}")
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, 60)
 
-# =============================
-# Проверка истории при запуске
-# =============================
-async def check_history_and_send():
-    print(f"[{local_time()}] 🔎 Проверка истории в {len(CHAT_IDS)} чатах...")
-    found = []
-    for ch in CHAT_IDS:
+# ------------------------
+# Динамическая выборка чатов, где состоит аккаунт
+# ------------------------
+async def gather_monitored_chats():
+    """
+    Собирает список dialog id всех групп и каналов, где состоит аккаунт,
+    исключая приватные ЛС и сервисные чаты и те, что указаны в EXCLUDE_CHAT_IDS.
+    """
+    exclude = set()
+    if EXCLUDE_CHAT_IDS:
+        for s in EXCLUDE_CHAT_IDS.split(","):
+            s = s.strip()
+            if s:
+                try:
+                    exclude.add(int(s))
+                except:
+                    pass
+
+    ids = set()
+    async for dialog in client.iter_dialogs():
         try:
-            entity = await client.get_entity(ch)
-            msgs = await client.get_messages(entity, limit=50)
+            # dialog.entity может быть Channel, Chat, User
+            if getattr(dialog, "is_user", False):
+                continue  # пропускаем ЛС
+            # фильтруем пустые/системные
+            ent = dialog.entity
+            # Чекаем, что это группа или канал (а не бот/паблик без смысла)
+            if getattr(ent, "megagroup", False) or getattr(ent, "broadcast", False) or getattr(ent, "group", False):
+                cid = dialog.id
+                if cid in exclude:
+                    continue
+                ids.add(cid)
+        except Exception:
+            continue
+    return ids
+
+# ------------------------
+# Проверка истории (один проход для всех monitored chats)
+# ------------------------
+async def check_history_once(monitored_ids):
+    print(f"[{local_time_str()}] 🔎 Проверка истории ({len(monitored_ids)} чатов, limit {HISTORY_CHECK_LIMIT})...")
+    found = []
+    # Проходим по списку с небольшой рандомной задержкой, чтобы выглядеть «по-человечески»
+    for ch in monitored_ids:
+        try:
+            # читаем небольшими пачками, с рандомной паузой
+            msgs = await client.get_messages(ch, limit=HISTORY_CHECK_LIMIT)
             for m in msgs:
                 if m.message and contains_keyword(m.message):
-                    formatted = await format_message(ch, m)
-                    found.append(formatted)
-            await asyncio.sleep(1.2)
+                    if mark_seen(ch, m.id):
+                        fm = await format_message(ch, m)
+                        found.append(fm)
+                        # ограничение на скорость формирования — небольшая пауза
+                        await asyncio.sleep(random.uniform(0.05, 0.35))
+            # пауза между чатами (человеческая)
+            await asyncio.sleep(random.uniform(0.8, 1.6))
         except FloodWaitError as e:
-            wait = e.seconds + 5
-            print(f"[{local_time()}] ⏳ FloodWait {e.seconds} сек при чтении {ch}, ждём...")
-            await asyncio.sleep(wait)
+            print(f"[{local_time_str()}] ⏳ FloodWait при чтении {ch}: {e.seconds}s")
+            await asyncio.sleep(e.seconds + 5)
+        except RPCError as e:
+            print(f"[{local_time_str()}] ⚠️ RPCError чтения {ch}: {e}")
+            await asyncio.sleep(random.uniform(2, 5))
         except Exception as e:
-            print(f"[{local_time()}] ⚠️ Ошибка при чтении {ch}: {e}")
+            print(f"[{local_time_str()}] ⚠️ Ошибка чтения истории {ch}: {e}")
+            await asyncio.sleep(random.uniform(1, 3))
 
     if found:
         batch = "\n\n---\n\n".join(found)
-        MAX_LEN = 4000
-        parts = [batch[i:i+MAX_LEN] for i in range(0, len(batch), MAX_LEN)]
-        for p in parts:
-            await send_message_safe(CHAT_ID, f"🌊 Найдено совпадений ({len(found)}):\n\n{p}")
-        print(f"[{local_time()}] ✅ Отправлено {len(found)} найденных сообщений.")
+        # если много — разбиваем, и соблюдаем лимиты пересылок в час
+        if allowed_forward():
+            await bot_send_text(f"🌊 Найдено совпадений в истории ({len(found)}):\n\n{batch}")
+            print(f"[{local_time_str()}] ✅ Отправлено найденных сообщений из истории: {len(found)}")
+        else:
+            print(f"[{local_time_str()}] ⚠️ Превышен лимит пересылок в час, не отправлено {len(found)} найденных сообщений.")
     else:
-        print(f"[{local_time()}] 😴 Совпадений не найдено.")
+        print(f"[{local_time_str()}] 😴 Совпадений в истории не найдено.")
 
-# =============================
-# Реальное время — обработчик новых сообщений
-# =============================
-@client.on(events.NewMessage(chats=CHAT_IDS))
+# ------------------------
+# Обработчик новых сообщений — теперь без фильтра chats=..., но с осторожной фильтрацией внутри.
+# ------------------------
+@client.on(events.NewMessage)
 async def new_message_handler(event):
     try:
-        text = event.message.message or ""
-        print(f"[{local_time()}] 🆕 Новое сообщение: {text[:100]!s}")
-        if contains_keyword(text):
-            channel_name = getattr(event.chat, "username", None) or getattr(event.chat, "title", str(event.chat))
-            formatted = await format_message(channel_name, event.message)
-            await send_message_safe(CHAT_ID, formatted)
-            print(f"[{local_time()}] ✅ Совпадение найдено и отправлено.")
-    except Exception as e:
-        print(f"[{local_time()}] ⚠️ Ошибка в обработчике: {e}")
+        # фильтры — пропускаем личные сообщения (мы мониторим группы/каналы)
+        if event.is_private:
+            return
 
-# =============================
-# Периодический пинг
-# =============================
+        chat_id = event.chat_id
+        # небольшая задержка (чтобы не выглядеть молниеносным роботом)
+        await asyncio.sleep(random.uniform(0.4, 1.6))
+
+        # некоторые сервисные/админские сообщения лучше пропускать
+        # пропускаем, если это сообщение от самого бота или от системных юзеров
+        if getattr(event.message, "from_id", None) is None:
+            return
+
+        text = event.message.message or ""
+        preview = text[:120].replace("\n", " ")
+        print(f"[{local_time_str()}] 🆕 Новое сообщение ({chat_id}): {preview}")
+
+        # Проверяем на ключевые слова
+        if contains_keyword(text):
+            # не форвардим, если лимит пересылок исчерпан
+            if not allowed_forward():
+                print(f"[{local_time_str()}] ⚠️ Лимит пересылок в час исчерпан — сообщение пропущено.")
+                return
+
+            # ставим небольшую рандомную задержку перед обработкой — как человек читает
+            await asyncio.sleep(random.uniform(0.4, 2.4))
+
+            # если ранее не отмечено как seen
+            if mark_seen(chat_id, event.message.id):
+                # формируем и отправляем уведомление ботом
+                formatted = await format_message(chat_id, event.message)
+                await bot_send_text(formatted)
+                print(f"[{local_time_str()}] ✅ Совпадение отправлено.")
+            else:
+                print(f"[{local_time_str()}] 💤 Уже отмечено как прочитанное — пропускаем.")
+    except FloodWaitError as e:
+        print(f"[{local_time_str()}] ⏳ FloodWait в handler: {e.seconds}s")
+        await asyncio.sleep(e.seconds + 5)
+    except Exception as e:
+        print(f"[{local_time_str()}] ⚠️ Ошибка в обработчике новых сообщений: {e}")
+
+# ------------------------
+# Пинг (каждый час) — чтобы Render не усыплял процесс
+# ------------------------
 async def periodic_ping():
     while True:
-        await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
-        await send_message_safe(CHAT_ID, f"🏄‍♂️ SurfHunter онлайн — {local_time()}")
-        print(f"[{local_time()}] ⏱️ Пинг отправлен.")
+        try:
+            # пинг каждые CHECK_INTERVAL_HOURS часов (по умолчанию 1 час)
+            await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
+            # рандомим текст пинга — не выглядеть как бот
+            pings = [
+                f"🏄‍♂️ SurfHunter ONLINE — {local_time_str()}",
+                f"🌊 Серф-хантер жив, {local_time_str()}",
+                f"🤙 Проверка связи — {local_time_str()} (auto-ping)"
+            ]
+            await bot_send_text(random.choice(pings))
+            print(f"[{local_time_str()}] ⏱️ Пинг отправлен.")
+        except Exception as e:
+            print(f"[{local_time_str()}] ⚠️ Ошибка при отправке пинга: {e}")
+            await asyncio.sleep(10)
 
-# =============================
-# Основной старт
-# =============================
+# ------------------------
+# Периодическая проверка истории (каждые HISTORY_CHECK_HOURS)
+# ------------------------
+async def periodic_history_check():
+    while True:
+        try:
+            # собираем динамически мониторируемые чаты
+            monitored = await gather_monitored_chats()
+            # проверяем историю
+            await check_history_once(monitored)
+        except Exception as e:
+            print(f"[{local_time_str()}] ⚠️ Ошибка в периодической проверке истории: {e}")
+        # Спим с небольшим джиттером
+        await asyncio.sleep(HISTORY_CHECK_HOURS * 3600 + random.uniform(10, 300))
+
+# ------------------------
+# Main
+# ------------------------
 async def main():
     try:
-        print(f"[{local_time()}] 🚀 Запуск клиента...")
-        await client.start(bot_token=BOT_TOKEN)
+        print(f"[{local_time_str()}] 🚀 Запуск Telethon userbot...")
+        await client.start()
         me = await client.get_me()
-        print(f"[{local_time()}] ✅ Бот @{me.username or me.first_name} запущен!")
+        display_name = me.first_name or me.username or str(me.id)
+        print(f"[{local_time_str()}] ✅ User account started: {display_name}")
 
-        await send_message_safe(CHAT_ID, f"🌊 Все ключи найдены, бот готов!\n🤙 Волны чекаем, всё стабильно.\n🕒 Время запуска: {local_time()}")
+        # Стартовое сообщение (отправляем через Bot API)
+        start_msg = (
+            f"😈 {display_name} - ПОДКЛЮЧЁН К ЭФИРУ ! - {local_time_str()}\n"
+            f"🫡 ГОТОВ НЕСТИ МИССИЮ !\n"
+            f"🌊 Волны чекаю, все стабильно !\n"
+            f"⏱️ Время выхода в АСТРАЛ : {local_datetime_str()}"
+        )
+        await bot_send_text(start_msg)
+        print(f"[{local_time_str()}] 📩 Стартовое уведомление отправлено SurfHanter-ботом.")
 
-        await check_history_and_send()
+        # Первый сбор monitored chats и первая проверка истории
+        monitored = await gather_monitored_chats()
+        await check_history_once(monitored)
+
+        # Запускаем фоновые задачи
         asyncio.create_task(periodic_ping())
+        asyncio.create_task(periodic_history_check())
 
+        # run_until_disconnected() блокирует и обрабатывает события NewMessage
         await client.run_until_disconnected()
 
     except FloodWaitError as e:
-        wait = e.seconds + 5
-        print(f"[{local_time()}] ⏳ FloodWait {e.seconds} сек. Ждём {wait} сек...")
-        await asyncio.sleep(wait)
-        os.execv(sys.executable, [sys.executable] + sys.argv)
-    except Exception as e:
-        print(f"[{local_time()}] 💥 Критическая ошибка: {e}")
-        await asyncio.sleep(60)
+        print(f"[{local_time_str()}] ⏳ FloodWait (main): {e.seconds}s — жду и перезапускаюсь")
+        await asyncio.sleep(e.seconds + 5)
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
+    except Exception as e:
+        print(f"[{local_time_str()}] 💥 Критическая ошибка (main): {e}")
+        # короткая пауза и перезапуск
+        await asyncio.sleep(30 + random.uniform(0, 10))
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+# ------------------------
+# Entrypoint
+# ------------------------
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print(f"[{local_time()}] 🛑 Остановка вручную.")
+        print(f"[{local_time_str()}] 🛑 Остановка вручную.")
+    except Exception as e:
+        print(f"[{local_time_str()}] 💥 Unhandled: {e}")
