@@ -1,0 +1,13 @@
+# Environment
+.env
+
+# Telethon session files
+*.session
+*.session-journal
+
+# Logs / caches
+__pycache__/
+*.log
+
+# Local data
+seen_ids.json
