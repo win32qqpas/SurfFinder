@@ -240,15 +240,37 @@ async def periodic_ping():
 # =========================
 async def main():
     print(f"[{local_time()}] 🚀 Запуск SurfHuman userbot...")
+
+    # 🔹 Пытаемся запустить клиента
     await client.start()
+
+    # 🛡️ Проверяем, действительно ли сессия активна
+    await client.connect()
+    if not await client.is_user_authorized():
+        msg = "❌ SESSION_STRING недействителен или устарел. Обнови его в Render Environment."
+        print(f"[{local_time()}] {msg}")
+        try:
+            await bot_send(msg)
+        except Exception as e:
+            print(f"[{local_time()}] ⚠️ Не удалось отправить уведомление ботом: {e}")
+        # Спим немного, чтобы Render не сразу рестартовал
+        await asyncio.sleep(600)
+        sys.exit(1)
+    else:
+        print(f"[{local_time()}] ✅ Сессия действительна, подключение подтверждено.")
+
+    # ✅ Всё ок — продолжаем как раньше
     me = await client.get_me()
     print(f"[{local_time()}] ✅ Аккаунт {me.first_name or me.username} запущен!")
 
+    await asyncio.sleep(random.uniform(2, 5))  # 🌊 небольшой естественный лаг
     await bot_send(f"🌊 Userbot подключен к эфиру {local_datetime()}\n🤙 SurfHunter готов.")
 
+    # 👁️ Запуск фоновых процессов
     asyncio.create_task(periodic_ping())
     asyncio.create_task(random_activity())
 
+    # ♻️ Основной рабочий цикл
     while True:
         try:
             await check_history()
