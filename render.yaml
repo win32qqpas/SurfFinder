@@ -1,0 +1,19 @@
+services:
+  - type: worker
+    name: surf-human-userbot
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python3 surf_human_userbot.py"
+    envVars:
+      - key: API_ID
+        sync: false
+      - key: API_HASH
+        sync: false
+      - key: SESSION_STRING
+        sync: false
+      - key: OWNER_CHAT_ID
+        sync: false
+      - key: CHECK_INTERVAL_HOURS
+        value: "2"
+      - key: TZ_OFFSET
+        value: "8"
