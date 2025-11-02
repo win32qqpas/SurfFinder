@@ -236,9 +236,26 @@ async def periodic_ping():
             await asyncio.sleep(600)
 
 # =========================
+# 🧱 Анти-дубликат — вставляем сюда
+# =========================
+import atexit
+
+LOCK_FILE = "/tmp/surfhuman.lock"
+
+def ensure_single_instance():
+    """Не позволяет запустить второй экземпляр SurfHuman."""
+    if os.path.exists(LOCK_FILE):
+        print(f"[{local_time()}] ⚠️ SurfHuman уже запущен — второй экземпляр остановлен.")
+        sys.exit(0)
+    with open(LOCK_FILE, "w") as f:
+        f.write(str(os.getpid()))
+    atexit.register(lambda: os.path.exists(LOCK_FILE) and os.remove(LOCK_FILE))
+
+# =========================
 # 🚀 Основной цикл
 # =========================
 async def main():
+    ensure_single_instance()  # 🧩 вызываем сразу при старте
     print(f"[{local_time()}] 🚀 Запуск SurfHuman userbot...")
 
     # 🔹 Пытаемся запустить клиента
@@ -253,7 +270,6 @@ async def main():
             await bot_send(msg)
         except Exception as e:
             print(f"[{local_time()}] ⚠️ Не удалось отправить уведомление ботом: {e}")
-        # Спим немного, чтобы Render не сразу рестартовал
         await asyncio.sleep(600)
         sys.exit(1)
     else:
@@ -263,7 +279,7 @@ async def main():
     me = await client.get_me()
     print(f"[{local_time()}] ✅ Аккаунт {me.first_name or me.username} запущен!")
 
-    await asyncio.sleep(random.uniform(2, 5))  # 🌊 небольшой естественный лаг
+    await asyncio.sleep(random.uniform(2, 5))  # 🌊 естественный лаг
     await bot_send(f"🌊 Userbot подключен к эфиру {local_datetime()}\n🤙 SurfHunter готов.")
 
     # 👁️ Запуск фоновых процессов
