@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# 🌊 surf_human_userbot — монитор чатов с "человеческим" поведением
+# 🌊 SurfHuman Userbot — мониторинг Telegram по ключевым словам (серфинг, обучение и т.п.)
 
 import os
 import sys
@@ -10,7 +10,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.errors import FloodWaitError, RPCError
+from telethon.errors import FloodWaitError
 
 # =========================
 # 🔧 Настройки окружения
@@ -18,42 +18,49 @@ from telethon.errors import FloodWaitError, RPCError
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
 SESSION_STRING = os.getenv("SESSION_STRING")
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "8438987254:AAHPW6Sq_Z2VmXOEx0DJ7WRWnZ1vfmdi0Ik"
 OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID")
 CHECK_INTERVAL_HOURS = float(os.getenv("CHECK_INTERVAL_HOURS", "2"))
 TZ_OFFSET = int(os.getenv("TZ_OFFSET", "8"))  # Бали
 
+BOT_TOKEN = "8438987254:AAHPW6Sq_Z2VmXOEx0DJ7WRWnZ1vfmdi0Ik"
+BOT_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+
+# Проверка ENV
 missing = [k for k, v in {
     "API_ID": API_ID,
     "API_HASH": API_HASH,
     "SESSION_STRING": SESSION_STRING,
-    "OWNER_CHAT_ID": OWNER_CHAT_ID
+    "OWNER_CHAT_ID": OWNER_CHAT_ID,
 }.items() if not v]
 
 if missing:
-    print("❌ Отсутствуют ENV переменные:", missing)
+    print("❌ Ошибка: отсутствуют ENV переменные:", ", ".join(missing))
     sys.exit(1)
 
 # =========================
 # 🌊 Ключевые слова
 # =========================
 KEYWORDS = [
-    "серфинг","сёрфинг","серф","сёрф","surf","surfing",
-    "инструктор по серфингу","уроки серфинга","сёрфтренер",
-    "серфкемп","занятие по серфингу","тренер по серфингу",
-    "инструктор для серфинга","сёрф кемп","серф лагерь","surf school"
+    "серфинг", "сёрфинг", "серф", "сёрф", "surf", "surfing",
+    "инструктор по серфингу", "уроки серфинга", "сёрфтренер",
+    "серфкемп", "занятие по серфингу", "тренер по серфингу",
+    "инструктор для серфинга", "сёрф кемп", "серф лагерь", "surf school"
 ]
 
 # =========================
-# 🕒 Время
+# 🕒 Время и формат
 # =========================
-UTC = timezone.utc
-def local_now(): return datetime.now(UTC) + timedelta(hours=TZ_OFFSET)
-def local_time(): return local_now().strftime("%H:%M")
-def local_datetime(): return local_now().strftime("%d.%m %H:%M")
+def local_now():
+    return datetime.now(timezone.utc) + timedelta(hours=TZ_OFFSET)
+
+def local_time():
+    return local_now().strftime("%H:%M")
+
+def local_datetime():
+    return local_now().strftime("%d.%m %H:%M")
 
 # =========================
-# 🧠 Файлы
+# 🧠 Работа с seen-файлом
 # =========================
 SEEN_FILE = "seen_msgs.json"
 
@@ -62,29 +69,26 @@ def load_seen():
         if os.path.exists(SEEN_FILE):
             with open(SEEN_FILE, "r", encoding="utf-8") as f:
                 return set(json.load(f))
-    except Exception as e:
-        print(f"⚠️ Ошибка чтения SEEN: {e}")
+    except Exception:
+        pass
     return set()
 
 def save_seen(data):
     try:
-        tmp = SEEN_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
+        with open(SEEN_FILE, "w", encoding="utf-8") as f:
             json.dump(list(data), f, ensure_ascii=False)
-        os.replace(tmp, SEEN_FILE)
     except Exception as e:
-        print(f"[{local_time()}] ⚠️ Ошибка сохранения: {e}")
+        print(f"[{local_time()}] ⚠️ Ошибка сохранения seen: {e}")
 
 SEEN = load_seen()
 
 # =========================
-# 🧩 Telethon client
+# ⚙️ Telethon Client
 # =========================
 client = TelegramClient(StringSession(SESSION_STRING), int(API_ID), API_HASH)
-BOT_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
 # =========================
-# 📬 Отправка через Bot API
+# 📬 Отправка сообщений через Bot API
 # =========================
 async def bot_send(text):
     if not text:
@@ -99,14 +103,14 @@ async def bot_send(text):
                     "text": p,
                     "disable_web_page_preview": True
                 }) as r:
-                    print(f"[{local_time()}] 📩 Сообщение отправлено (len {len(p)}) — {r.status}")
+                    print(f"[{local_time()}] 📩 Сообщение отправлено ({r.status})")
             except Exception as e:
-                print(f"[{local_time()}] ⚠️ Ошибка Bot API: {e}")
+                print(f"[{local_time()}] ⚠️ Ошибка отправки Bot API: {e}")
 
 # =========================
-# 🕵️‍♂️ Keyword checker
+# 🔎 Поиск по ключевым словам
 # =========================
-def contains_keyword(text):
+def contains_keyword(text: str) -> bool:
     if not text:
         return False
     t = text.lower()
@@ -121,7 +125,7 @@ def mark_seen(chat_id, msg_id):
     return False
 
 # =========================
-# 🧾 Форматирование сообщений
+# 🧾 Форматирование найденных сообщений
 # =========================
 async def format_msg(event):
     try:
@@ -129,7 +133,7 @@ async def format_msg(event):
         author = " ".join(filter(None, [sender.first_name, sender.last_name])) or getattr(sender, "username", "—")
         if getattr(sender, "username", None):
             author += f" (@{sender.username})"
-    except:
+    except Exception:
         author = "—"
 
     chat = await event.get_chat()
@@ -142,66 +146,52 @@ async def format_msg(event):
     if len(msg_text) > 700:
         msg_text = msg_text[:700] + "..."
 
-    text = (
-        f"📍 {ch_name}\n👤 {author}\n🕒 {local_datetime()}\n\n"
-        f"{msg_text}\n"
-    )
+    text = f"📍 {ch_name}\n👤 {author}\n🕒 {local_datetime()}\n\n{msg_text}"
     if link:
-        text += f"🔗 {link}"
+        text += f"\n🔗 {link}"
     return text
 
 # =========================
-# ⏸️ Задержка
-# =========================
-async def fake_pause():
-    await asyncio.sleep(random.uniform(0.5, 2.5))
-
-# =========================
-# 🔎 Проверка истории
-# =========================
-async def check_history():
-    print(f"[{local_time()}] 🔍 Проверка истории чатов...")
-    async for dialog in client.iter_dialogs(limit=50):
-        if not (dialog.is_group or dialog.is_channel):
-            continue
-        try:
-            msgs = await client.get_messages(dialog.id, limit=100)
-            for m in msgs:
-                if not m.message or not contains_keyword(m.message):
-                    continue
-                # Пропускаем старые сообщения
-                if (datetime.now(UTC) - m.date).days > 7:
-                    continue
-                if mark_seen(dialog.id, m.id):
-                    await fake_pause()
-                    ev = type("Ev", (), {"message": m, "get_sender": m.get_sender, "get_chat": m.get_chat})
-                    fm = await format_msg(ev)
-                    await bot_send(fm)
-            await asyncio.sleep(random.uniform(2.0, 4.0))
-        except FloodWaitError as e:
-            print(f"[{local_time()}] ⏳ FloodWait: {e.seconds}s")
-            await asyncio.sleep(e.seconds + random.randint(5,15))
-        except Exception as e:
-            print(f"[{local_time()}] ⚠️ Ошибка истории: {e}")
-
-# =========================
-# ⚡ Новые сообщения
+# ⚡ Обработка новых сообщений
 # =========================
 @client.on(events.NewMessage)
 async def handler(event):
     if not (event.is_group or event.is_channel):
         return
-    text = event.message.message
-    if not text:
-        return
-    if contains_keyword(text) and mark_seen(event.chat_id, event.message.id):
-        await fake_pause()
-        fm = await format_msg(event)
-        await bot_send(fm)
-        print(f"[{local_time()}] ✅ Найдено совпадение в {event.chat_id}")
+    msg = event.message.message
+    if contains_keyword(msg):
+        if mark_seen(event.chat_id, event.message.id):
+            await asyncio.sleep(random.uniform(0.5, 2.0))
+            fm = await format_msg(event)
+            await bot_send(fm)
+            print(f"[{local_time()}] ✅ Новое совпадение: {event.chat_id}")
 
 # =========================
-# 🧍‍♂️ Имитация активности
+# 🕵️ Проверка истории
+# =========================
+async def check_history():
+    print(f"[{local_time()}] 🔍 Проверка истории чатов...")
+    async for dialog in client.iter_dialogs():
+        if not (dialog.is_group or dialog.is_channel):
+            continue
+        try:
+            msgs = await client.get_messages(dialog.id, limit=100)
+            for m in msgs:
+                if m.message and contains_keyword(m.message):
+                    if mark_seen(dialog.id, m.id):
+                        await asyncio.sleep(random.uniform(0.5, 2.0))
+                        fake_event = type("Ev", (), {"message": m, "get_sender": m.get_sender, "get_chat": m.get_chat})
+                        fm = await format_msg(fake_event)
+                        await bot_send(fm)
+            await asyncio.sleep(random.uniform(1.5, 3.0))
+        except FloodWaitError as e:
+            print(f"[{local_time()}] ⏳ FloodWait: {e.seconds}s")
+            await asyncio.sleep(e.seconds + 5)
+        except Exception as e:
+            print(f"[{local_time()}] ⚠️ Ошибка при проверке истории: {e}")
+
+# =========================
+# 👁️ Имитация активности
 # =========================
 async def random_activity():
     while True:
@@ -211,16 +201,15 @@ async def random_activity():
                 dialogs = await client.get_dialogs(limit=1)
                 if dialogs:
                     await client.send_read_acknowledge(dialogs[0])
-                    print(f"[{local_time()}] 👁️ Имитация активности (read)")
+                print(f"[{local_time()}] 👁️ Имитация активности (read)")
             elif choice == "idle":
                 await asyncio.sleep(random.uniform(20, 60))
             await asyncio.sleep(random.uniform(60, 180))
         except Exception as e:
             print(f"[{local_time()}] ⚠️ Ошибка активности: {e}")
-            await asyncio.sleep(60)
 
 # =========================
-# 🏄 Периодический пинг
+# ⏱️ Пинг для проверки живости
 # =========================
 async def periodic_ping():
     while True:
@@ -233,20 +222,16 @@ async def periodic_ping():
             await asyncio.sleep(600)
 
 # =========================
-# 🚀 Main
+# 🚀 Основной цикл
 # =========================
 async def main():
-    print(f"[{local_time()}] 🚀 Запуск userbot...")
-    try:
-        await client.start()
-    except Exception as e:
-        print(f"[{local_time()}] ❌ Ошибка старта клиента: {e}")
-        sys.exit(1)
-
+    print(f"[{local_time()}] 🚀 Запуск SurfHuman userbot...")
+    await client.start()
     me = await client.get_me()
     print(f"[{local_time()}] ✅ Аккаунт {me.first_name or me.username} запущен!")
 
-    await bot_send(f"🌊 Userbot подключен к эфиру! {local_datetime()}\n🤙 SurfHunter готов.")
+    await bot_send(f"🌊 Userbot подключен к эфиру {local_datetime()}\n🤙 SurfHunter готов.")
+
     asyncio.create_task(periodic_ping())
     asyncio.create_task(random_activity())
 
@@ -255,12 +240,11 @@ async def main():
             await check_history()
             await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
         except Exception as e:
-            print(f"[{local_time()}] 💥 Ошибка в основном цикле: {e}")
+            print(f"[{local_time()}] 💥 Ошибка цикла: {e}")
             await asyncio.sleep(60)
-            continue
 
 # =========================
-# ⏯️ Entrypoint
+# ▶️ Entrypoint
 # =========================
 if __name__ == "__main__":
     try:
