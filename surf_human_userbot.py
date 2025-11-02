@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# surf_human_userbot — монитор чатов с "человеческим" поведением
+# 🌊 surf_human_userbot — монитор чатов с "человеческим" поведением
 
 import os
 import sys
@@ -17,14 +17,19 @@ from telethon.errors import FloodWaitError, RPCError
 # =========================
 API_ID = os.getenv("API_ID")
 API_HASH = os.getenv("API_HASH")
-SESSION_STRING = os.getenv("SESSION_STRING")  # сессия твоего аккаунта
-BOT_TOKEN = "8438987254:AAHPW6Sq_Z2VmXOEx0DJ7WRWnZ1vfmdi0Ik"
-OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID")  # numeric id (твоя личка)
+SESSION_STRING = os.getenv("SESSION_STRING")
+BOT_TOKEN = os.getenv("BOT_TOKEN") or "8438987254:AAHPW6Sq_Z2VmXOEx0DJ7WRWnZ1vfmdi0Ik"
+OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID")
 CHECK_INTERVAL_HOURS = float(os.getenv("CHECK_INTERVAL_HOURS", "2"))
 TZ_OFFSET = int(os.getenv("TZ_OFFSET", "8"))  # Бали
 
-# Проверка окружения
-missing = [k for k, v in {"API_ID": API_ID, "API_HASH": API_HASH, "SESSION_STRING": SESSION_STRING, "OWNER_CHAT_ID": OWNER_CHAT_ID}.items() if not v]
+missing = [k for k, v in {
+    "API_ID": API_ID,
+    "API_HASH": API_HASH,
+    "SESSION_STRING": SESSION_STRING,
+    "OWNER_CHAT_ID": OWNER_CHAT_ID
+}.items() if not v]
+
 if missing:
     print("❌ Отсутствуют ENV переменные:", missing)
     sys.exit(1)
@@ -43,12 +48,9 @@ KEYWORDS = [
 # 🕒 Время
 # =========================
 UTC = timezone.utc
-def local_now():
-    return datetime.now(UTC) + timedelta(hours=TZ_OFFSET)
-def local_time():
-    return local_now().strftime("%H:%M")
-def local_datetime():
-    return local_now().strftime("%d.%m %H:%M")
+def local_now(): return datetime.now(UTC) + timedelta(hours=TZ_OFFSET)
+def local_time(): return local_now().strftime("%H:%M")
+def local_datetime(): return local_now().strftime("%d.%m %H:%M")
 
 # =========================
 # 🧠 Файлы
@@ -60,14 +62,16 @@ def load_seen():
         if os.path.exists(SEEN_FILE):
             with open(SEEN_FILE, "r", encoding="utf-8") as f:
                 return set(json.load(f))
-    except:
-        pass
+    except Exception as e:
+        print(f"⚠️ Ошибка чтения SEEN: {e}")
     return set()
 
 def save_seen(data):
     try:
-        with open(SEEN_FILE, "w", encoding="utf-8") as f:
+        tmp = SEEN_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(list(data), f, ensure_ascii=False)
+        os.replace(tmp, SEEN_FILE)
     except Exception as e:
         print(f"[{local_time()}] ⚠️ Ошибка сохранения: {e}")
 
@@ -147,65 +151,73 @@ async def format_msg(event):
     return text
 
 # =========================
+# ⏸️ Задержка
+# =========================
+async def fake_pause():
+    await asyncio.sleep(random.uniform(0.5, 2.5))
+
+# =========================
 # 🔎 Проверка истории
 # =========================
 async def check_history():
     print(f"[{local_time()}] 🔍 Проверка истории чатов...")
-    async for dialog in client.iter_dialogs():
+    async for dialog in client.iter_dialogs(limit=50):
         if not (dialog.is_group or dialog.is_channel):
             continue
         try:
             msgs = await client.get_messages(dialog.id, limit=100)
             for m in msgs:
-                if m.message and contains_keyword(m.message):
-                    if mark_seen(dialog.id, m.id):
-                        fake_pause()
-                        fm = await format_msg(type("Ev", (), {"message": m, "get_sender": m.get_sender, "get_chat": m.get_chat}))
-                        await bot_send(fm)
-            await asyncio.sleep(random.uniform(1.5, 3.0))
+                if not m.message or not contains_keyword(m.message):
+                    continue
+                # Пропускаем старые сообщения
+                if (datetime.now(UTC) - m.date).days > 7:
+                    continue
+                if mark_seen(dialog.id, m.id):
+                    await fake_pause()
+                    ev = type("Ev", (), {"message": m, "get_sender": m.get_sender, "get_chat": m.get_chat})
+                    fm = await format_msg(ev)
+                    await bot_send(fm)
+            await asyncio.sleep(random.uniform(2.0, 4.0))
         except FloodWaitError as e:
             print(f"[{local_time()}] ⏳ FloodWait: {e.seconds}s")
-            await asyncio.sleep(e.seconds + 5)
+            await asyncio.sleep(e.seconds + random.randint(5,15))
         except Exception as e:
             print(f"[{local_time()}] ⚠️ Ошибка истории: {e}")
 
 # =========================
-# ⚡ Обработка новых сообщений
+# ⚡ Новые сообщения
 # =========================
 @client.on(events.NewMessage)
 async def handler(event):
     if not (event.is_group or event.is_channel):
         return
-    if not event.message.message:
-        return
     text = event.message.message
-    if contains_keyword(text):
-        if mark_seen(event.chat_id, event.message.id):
-            fake_pause()
-            fm = await format_msg(event)
-            await bot_send(fm)
-            print(f"[{local_time()}] ✅ Найдено совпадение в {event.chat_id}")
+    if not text:
+        return
+    if contains_keyword(text) and mark_seen(event.chat_id, event.message.id):
+        await fake_pause()
+        fm = await format_msg(event)
+        await bot_send(fm)
+        print(f"[{local_time()}] ✅ Найдено совпадение в {event.chat_id}")
 
 # =========================
-# 🧍‍♂️ Имитация живого аккаунта
+# 🧍‍♂️ Имитация активности
 # =========================
 async def random_activity():
     while True:
         try:
-            # случайно имитируем "чтение", "в онлайне" или "ничего"
             choice = random.choice(["sleep", "active", "idle"])
             if choice == "active":
-                await client.send_read_acknowledge(await client.get_dialogs(limit=1))
-                print(f"[{local_time()}] 👁️ Имитация активности (read)")
+                dialogs = await client.get_dialogs(limit=1)
+                if dialogs:
+                    await client.send_read_acknowledge(dialogs[0])
+                    print(f"[{local_time()}] 👁️ Имитация активности (read)")
             elif choice == "idle":
                 await asyncio.sleep(random.uniform(20, 60))
             await asyncio.sleep(random.uniform(60, 180))
         except Exception as e:
             print(f"[{local_time()}] ⚠️ Ошибка активности: {e}")
-
-def fake_pause():
-    """Добавляет случайные мини-задержки для имитации человеческих действий"""
-    asyncio.sleep(random.uniform(0.5, 2.5))
+            await asyncio.sleep(60)
 
 # =========================
 # 🏄 Периодический пинг
@@ -215,7 +227,7 @@ async def periodic_ping():
         try:
             await bot_send(f"🏄‍♂️ SurfHunter активен — {local_time()}")
             print(f"[{local_time()}] ⏱️ Пинг отправлен.")
-            await asyncio.sleep(3600)  # каждый час
+            await asyncio.sleep(3600)
         except Exception as e:
             print(f"[{local_time()}] ⚠️ Ошибка пинга: {e}")
             await asyncio.sleep(600)
@@ -225,7 +237,12 @@ async def periodic_ping():
 # =========================
 async def main():
     print(f"[{local_time()}] 🚀 Запуск userbot...")
-    await client.start()
+    try:
+        await client.start()
+    except Exception as e:
+        print(f"[{local_time()}] ❌ Ошибка старта клиента: {e}")
+        sys.exit(1)
+
     me = await client.get_me()
     print(f"[{local_time()}] ✅ Аккаунт {me.first_name or me.username} запущен!")
 
@@ -238,9 +255,9 @@ async def main():
             await check_history()
             await asyncio.sleep(CHECK_INTERVAL_HOURS * 3600)
         except Exception as e:
-            print(f"[{local_time()}] 💥 Ошибка в цикле: {e}")
+            print(f"[{local_time()}] 💥 Ошибка в основном цикле: {e}")
             await asyncio.sleep(60)
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+            continue
 
 # =========================
 # ⏯️ Entrypoint
