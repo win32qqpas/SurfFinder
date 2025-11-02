@@ -7,6 +7,7 @@ import json
 import asyncio
 import aiohttp
 import random
+import atexit
 from datetime import datetime, timedelta, timezone
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
@@ -30,10 +31,13 @@ API_HASH = clean_env("API_HASH")
 SESSION_STRING = clean_env("SESSION_STRING")
 BOT_TOKEN = clean_env("BOT_TOKEN")
 OWNER_CHAT_ID = clean_env("OWNER_CHAT_ID")
-CHECK_INTERVAL_HOURS = float(os.getenv("CHECK_INTERVAL_HOURS", "2").strip())
+CHECK_INTERVAL_HOURS = float(os.getenv("CHECK_INTERVAL_HOURS", "8").strip())
 TZ_OFFSET = int(os.getenv("TZ_OFFSET", "8").strip())  # Бали по умолчанию
 
+# =========================
 # 📋 Проверка окружения
+# =========================
+
 missing = [k for k, v in {
     "API_ID": API_ID,
     "API_HASH": API_HASH,
@@ -45,6 +49,8 @@ missing = [k for k, v in {
 if missing:
     print("❌ Отсутствуют ENV переменные:", missing)
     sys.exit(1)
+
+BOT_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
 print("🔍 DEBUG Render environment:")
 for key in ["API_ID", "API_HASH", "SESSION_STRING", "BOT_TOKEN", "OWNER_CHAT_ID"]:
@@ -74,7 +80,7 @@ def local_datetime():
     return local_now().strftime("%d.%m %H:%M")
 
 # =========================
-# 🧠 Работа с seen-файлом
+# 🧠 Seen-файл
 # =========================
 SEEN_FILE = "seen_msgs.json"
 
@@ -122,7 +128,7 @@ async def bot_send(text):
                 print(f"[{local_time()}] ⚠️ Ошибка отправки Bot API: {e}")
 
 # =========================
-# 🔎 Поиск по ключевым словам
+# 🔎 Проверка ключевых слов
 # =========================
 def contains_keyword(text: str) -> bool:
     if not text:
@@ -139,7 +145,7 @@ def mark_seen(chat_id, msg_id):
     return False
 
 # =========================
-# 🧾 Форматирование найденных сообщений
+# 🧾 Форматирование сообщений
 # =========================
 async def format_msg(event):
     try:
@@ -166,22 +172,71 @@ async def format_msg(event):
     return text
 
 # =========================
+# 💬 Настройки поведения
+# =========================
+REACTION_DELAY_MIN = float(os.getenv("REACTION_DELAY_MIN", "4.0"))
+REACTION_DELAY_MAX = float(os.getenv("REACTION_DELAY_MAX", "10.0"))
+SEND_DELAY_MIN = float(os.getenv("SEND_DELAY_MIN", "2.0"))
+SEND_DELAY_MAX = float(os.getenv("SEND_DELAY_MAX", "8.0"))
+PER_CHAT_COOLDOWN_SECONDS = int(os.getenv("PER_CHAT_COOLDOWN_SECONDS", "900"))  # 15 мин
+GLOBAL_RATE_WINDOW = int(os.getenv("GLOBAL_RATE_WINDOW", "600"))  # 10 мин
+GLOBAL_RATE_MAX = int(os.getenv("GLOBAL_RATE_MAX", "6"))
+
+_last_sent_per_chat = {}
+_global_sent_times = []
+_pending_per_chat = {}
+
+# =========================
 # ⚡ Обработка новых сообщений
 # =========================
 @client.on(events.NewMessage)
 async def handler(event):
-    if not (event.is_group or event.is_channel):
-        return
-    msg = event.message.message
-    if contains_keyword(msg):
-        if mark_seen(event.chat_id, event.message.id):
-            await asyncio.sleep(random.uniform(0.5, 2.0))
-            fm = await format_msg(event)
-            await bot_send(fm)
-            print(f"[{local_time()}] ✅ Новое совпадение: {event.chat_id}")
+    try:
+        if not (event.is_group or event.is_channel):
+            return
+        msg = event.message.message
+        if not msg or not contains_keyword(msg):
+            return
+
+        chat_id = event.chat_id
+        msg_id = event.message.id
+
+        if not mark_seen(chat_id, msg_id):
+            return
+
+        now_ts = asyncio.get_event_loop().time()
+        last = _last_sent_per_chat.get(chat_id, 0)
+        if now_ts - last < PER_CHAT_COOLDOWN_SECONDS:
+            lst = _pending_per_chat.setdefault(chat_id, [])
+            lst.append((msg_id, await format_msg(event)))
+            print(f"[{local_time()}] ⏳ В cooldown для чата {chat_id}, отложено ({len(lst)})")
+            return
+
+        await asyncio.sleep(random.uniform(REACTION_DELAY_MIN, REACTION_DELAY_MAX))
+        fm = await format_msg(event)
+        await asyncio.sleep(random.uniform(SEND_DELAY_MIN, SEND_DELAY_MAX))
+
+        cutoff = now_ts - GLOBAL_RATE_WINDOW
+        while _global_sent_times and _global_sent_times[0] < cutoff:
+            _global_sent_times.pop(0)
+        if len(_global_sent_times) >= GLOBAL_RATE_MAX:
+            _pending_per_chat.setdefault(chat_id, []).append((msg_id, fm))
+            print(f"[{local_time()}] 🚫 Глобальный rate-limit, отложено.")
+            return
+
+        await bot_send(fm)
+        _global_sent_times.append(now_ts)
+        _last_sent_per_chat[chat_id] = now_ts
+        print(f"[{local_time()}] ✅ Уведомление отправлено по чату {chat_id}")
+
+    except FloodWaitError as e:
+        print(f"[{local_time()}] ⏳ FloodWait: {e.seconds}s")
+        await asyncio.sleep(e.seconds + random.uniform(2, 6))
+    except Exception as e:
+        print(f"[{local_time()}] ⚠️ Ошибка в handler: {e}")
 
 # =========================
-# 🕵️ Проверка истории
+# 🔁 Проверка истории
 # =========================
 async def check_history():
     print(f"[{local_time()}] 🔍 Проверка истории чатов...")
@@ -189,7 +244,7 @@ async def check_history():
         if not (dialog.is_group or dialog.is_channel):
             continue
         try:
-            msgs = await client.get_messages(dialog.id, limit=100)
+            msgs = await client.get_messages(dialog.id, limit=60)
             for m in msgs:
                 if m.message and contains_keyword(m.message):
                     if mark_seen(dialog.id, m.id):
@@ -197,12 +252,12 @@ async def check_history():
                         fake_event = type("Ev", (), {"message": m, "get_sender": m.get_sender, "get_chat": m.get_chat})
                         fm = await format_msg(fake_event)
                         await bot_send(fm)
-            await asyncio.sleep(random.uniform(1.5, 3.0))
+            await asyncio.sleep(random.uniform(2, 4))
         except FloodWaitError as e:
             print(f"[{local_time()}] ⏳ FloodWait: {e.seconds}s")
             await asyncio.sleep(e.seconds + 5)
         except Exception as e:
-            print(f"[{local_time()}] ⚠️ Ошибка при проверке истории: {e}")
+            print(f"[{local_time()}] ⚠️ Ошибка check_history: {e}")
 
 # =========================
 # 👁️ Имитация активности
@@ -223,7 +278,38 @@ async def random_activity():
             print(f"[{local_time()}] ⚠️ Ошибка активности: {e}")
 
 # =========================
-# ⏱️ Пинг для проверки живости
+# ⏳ Отложенные уведомления
+# =========================
+async def pending_watcher():
+    while True:
+        try:
+            now_ts = asyncio.get_event_loop().time()
+            for chat_id in list(_pending_per_chat.keys()):
+                last = _last_sent_per_chat.get(chat_id, 0)
+                if now_ts - last >= PER_CHAT_COOLDOWN_SECONDS:
+                    pending = _pending_per_chat.pop(chat_id, [])
+                    if not pending:
+                        continue
+                    parts = [p for _, p in pending[:3]]
+                    agg = "🔔 Отложенные упоминания:\n\n" + "\n\n".join(parts)
+                    cutoff = now_ts - GLOBAL_RATE_WINDOW
+                    while _global_sent_times and _global_sent_times[0] < cutoff:
+                        _global_sent_times.pop(0)
+                    if len(_global_sent_times) >= GLOBAL_RATE_MAX:
+                        _pending_per_chat.setdefault(chat_id, []).extend(pending)
+                        continue
+                    await asyncio.sleep(random.uniform(2, 6))
+                    await bot_send(agg)
+                    _global_sent_times.append(asyncio.get_event_loop().time())
+                    _last_sent_per_chat[chat_id] = asyncio.get_event_loop().time()
+                    print(f"[{local_time()}] ✅ Отправлен агрегат для {chat_id}")
+            await asyncio.sleep(45 + random.uniform(0, 30))
+        except Exception as e:
+            print(f"[{local_time()}] ⚠️ Ошибка pending_watcher: {e}")
+            await asyncio.sleep(10)
+
+# =========================
+# ⏱️ Пинг
 # =========================
 async def periodic_ping():
     while True:
@@ -236,14 +322,10 @@ async def periodic_ping():
             await asyncio.sleep(600)
 
 # =========================
-# 🧱 Анти-дубликат — вставляем сюда
+# 🧱 Анти-дубликат
 # =========================
-import atexit
-
 LOCK_FILE = "/tmp/surfhuman.lock"
-
 def ensure_single_instance():
-    """Не позволяет запустить второй экземпляр SurfHuman."""
     if os.path.exists(LOCK_FILE):
         print(f"[{local_time()}] ⚠️ SurfHuman уже запущен — второй экземпляр остановлен.")
         sys.exit(0)
@@ -255,13 +337,10 @@ def ensure_single_instance():
 # 🚀 Основной цикл
 # =========================
 async def main():
-    ensure_single_instance()  # 🧩 вызываем сразу при старте
+    ensure_single_instance()
     print(f"[{local_time()}] 🚀 Запуск SurfHuman userbot...")
 
-    # 🔹 Пытаемся запустить клиента
     await client.start()
-
-    # 🛡️ Проверяем, действительно ли сессия активна
     await client.connect()
     if not await client.is_user_authorized():
         msg = "❌ SESSION_STRING недействителен или устарел. Обнови его в Render Environment."
@@ -269,24 +348,19 @@ async def main():
         try:
             await bot_send(msg)
         except Exception as e:
-            print(f"[{local_time()}] ⚠️ Не удалось отправить уведомление ботом: {e}")
+            print(f"[{local_time()}] ⚠️ Ошибка уведомления: {e}")
         await asyncio.sleep(600)
         sys.exit(1)
-    else:
-        print(f"[{local_time()}] ✅ Сессия действительна, подключение подтверждено.")
 
-    # ✅ Всё ок — продолжаем как раньше
     me = await client.get_me()
     print(f"[{local_time()}] ✅ Аккаунт {me.first_name or me.username} запущен!")
-
-    await asyncio.sleep(random.uniform(2, 5))  # 🌊 естественный лаг
+    await asyncio.sleep(random.uniform(2, 5))
     await bot_send(f"🌊 Userbot подключен к эфиру {local_datetime()}\n🤙 SurfHunter готов.")
 
-    # 👁️ Запуск фоновых процессов
     asyncio.create_task(periodic_ping())
     asyncio.create_task(random_activity())
+    asyncio.create_task(pending_watcher())
 
-    # ♻️ Основной рабочий цикл
     while True:
         try:
             await check_history()
