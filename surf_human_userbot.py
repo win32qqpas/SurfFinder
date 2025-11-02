@@ -15,27 +15,41 @@ from telethon.errors import FloodWaitError
 # =========================
 # 🔧 Настройки окружения
 # =========================
-API_ID = os.getenv("API_ID")
-API_HASH = os.getenv("API_HASH")
-SESSION_STRING = os.getenv("SESSION_STRING")
-OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID")
-CHECK_INTERVAL_HOURS = float(os.getenv("CHECK_INTERVAL_HOURS", "2"))
-TZ_OFFSET = int(os.getenv("TZ_OFFSET", "8"))  # Бали
 
-BOT_TOKEN = "8438987254:AAHPW6Sq_Z2VmXOEx0DJ7WRWnZ1vfmdi0Ik"
-BOT_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+def clean_env(varname: str, required: bool = True) -> str:
+    """Безопасно читает переменные окружения и очищает от лишних символов."""
+    val = os.getenv(varname)
+    if val:
+        val = val.strip().replace("\n", "").replace("\r", "")
+    if required and not val:
+        print(f"❌ ENV переменная {varname} отсутствует или пуста")
+    return val or ""
 
-# Проверка ENV
+API_ID = clean_env("API_ID")
+API_HASH = clean_env("API_HASH")
+SESSION_STRING = clean_env("SESSION_STRING")
+BOT_TOKEN = clean_env("BOT_TOKEN")
+OWNER_CHAT_ID = clean_env("OWNER_CHAT_ID")
+CHECK_INTERVAL_HOURS = float(os.getenv("CHECK_INTERVAL_HOURS", "2").strip())
+TZ_OFFSET = int(os.getenv("TZ_OFFSET", "8").strip())  # Бали по умолчанию
+
+# 📋 Проверка окружения
 missing = [k for k, v in {
     "API_ID": API_ID,
     "API_HASH": API_HASH,
     "SESSION_STRING": SESSION_STRING,
-    "OWNER_CHAT_ID": OWNER_CHAT_ID,
+    "BOT_TOKEN": BOT_TOKEN,
+    "OWNER_CHAT_ID": OWNER_CHAT_ID
 }.items() if not v]
 
 if missing:
-    print("❌ Ошибка: отсутствуют ENV переменные:", ", ".join(missing))
+    print("❌ Отсутствуют ENV переменные:", missing)
     sys.exit(1)
+
+print("🔍 DEBUG Render environment:")
+for key in ["API_ID", "API_HASH", "SESSION_STRING", "BOT_TOKEN", "OWNER_CHAT_ID"]:
+    val = os.getenv(key)
+    print(f"  {key}: {'✅ set' if val else '❌ missing'} (len={len(val) if val else 0})")
 
 # =========================
 # 🌊 Ключевые слова
